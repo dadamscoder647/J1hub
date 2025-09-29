@@ -10,9 +10,19 @@ migrate = Migrate()
 babel = Babel()
 jwt = JWTManager()
 
-def create_app():
+def create_app(config_object: str | type | None = None, **config_overrides):
     app = Flask(__name__)
-    app.config.from_object('config.Config')
+    if config_object is None:
+        app.config.from_object("config.Config")
+    else:
+        app.config.from_object(config_object)
+
+    if config_overrides:
+        app.config.update(config_overrides)
+
+    default_upload_folder = os.path.join(app.root_path, "uploads")
+    app.config.setdefault("UPLOAD_FOLDER", default_upload_folder)
+    app.config.setdefault("UPLOAD_URL_PREFIX", "/uploads")
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -20,8 +30,9 @@ def create_app():
     jwt.init_app(app)
 
     # Register blueprints
-    from routes.auth import auth_bp
-    app.register_blueprint(auth_bp, url_prefix="/auth")
+    from routes.verify import verify_bp
+
+    app.register_blueprint(verify_bp)
 
     @app.route("/")
     def root():
