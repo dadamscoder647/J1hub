@@ -1,18 +1,33 @@
-"""User model."""
+"""User model definition."""
 
-from app import db
+from datetime import datetime
+
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from . import db
 
 
 class User(db.Model):
-    """Represents an application user."""
+    """Represents a platform user."""
 
-    __tablename__ = "user"
+    __tablename__ = "users"
 
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(64), nullable=False, default="user")
-    is_verified = db.Column(db.Boolean, default=False, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(32), nullable=False, default="worker")
+    is_verified = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    def __repr__(self) -> str:
+    def set_password(self, password: str) -> None:
+        """Hash and store the password."""
+
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        """Verify a password against the stored hash."""
+
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return f"<User {self.email}>"

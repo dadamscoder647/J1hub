@@ -1,8 +1,7 @@
 Flask
-SQLAlchemy
 Flask-JWT-Extended
 Flask-Migrate
-Flask-Babel
+SQLAlchemy
 python-dotenv
 stripe
 boto3
