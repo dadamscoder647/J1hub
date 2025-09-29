@@ -1,0 +1,9 @@
+Flask
+SQLAlchemy
+Flask-JWT-Extended
+Flask-Migrate
+Flask-Babel
+python-dotenv
+stripe
+boto3
+gunicorn
