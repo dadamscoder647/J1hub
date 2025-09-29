@@ -1,7 +1,15 @@
 import os
+from pathlib import Path
+
 
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///app.db")
+    BASE_DIR = Path(__file__).resolve().parent
+
+    SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
+
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_placeholder")
+
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "workspace" / "uploads"))

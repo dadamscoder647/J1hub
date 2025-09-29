@@ -1,30 +1,40 @@
 import os
 from flask import Flask, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from flask_babel import Babel
 from flask_jwt_extended import JWTManager
+from flask_migrate import Migrate
 
-db = SQLAlchemy()
+from config import Config
+from models import db
+from routes.verify import admin_bp, verify_bp
+
 migrate = Migrate()
-babel = Babel()
 jwt = JWTManager()
 
-def create_app():
+
+def create_app(config_class: type[Config] = Config) -> Flask:
     app = Flask(__name__)
-    app.config.from_object('config.Config')
+    app.config.from_object(config_class)
+
+    upload_dir = app.config.get("UPLOAD_DIR")
+    if upload_dir:
+        os.makedirs(upload_dir, exist_ok=True)
 
     db.init_app(app)
     migrate.init_app(app, db)
-    babel.init_app(app)
     jwt.init_app(app)
 
-    # Register blueprints
-    from routes.auth import auth_bp
-    app.register_blueprint(auth_bp, url_prefix="/auth")
+    app.register_blueprint(verify_bp, url_prefix="/verify")
+    app.register_blueprint(admin_bp, url_prefix="/admin/verify")
 
-    @app.route("/")
-    def root():
+    @app.route("/health")
+    def health():
         return jsonify({"status": "ok"})
 
     return app
+
+
+def create_wsgi_app():
+    return create_app()
+
+
+app = create_wsgi_app()
