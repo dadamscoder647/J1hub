@@ -1,4 +1,4 @@
-"""Listings blueprint with CRUD and application endpoints."""
+"""Listings blueprint with search, CRUD, and applications."""
 
 from __future__ import annotations
 
@@ -13,55 +13,33 @@ from flask_jwt_extended import (
 )
 from sqlalchemy import and_, or_
 
-from app import db
-from models.listing import Application, Listing, LISTING_CATEGORIES
+from models import db
+from models.application import Application
+from models.listing import CONTACT_METHODS, LISTING_CATEGORIES, Listing
 from models.user import User
 
 listings_bp = Blueprint("listings", __name__)
 
 
 def _get_current_user(optional: bool = False) -> User | None:
-    """Return the current user when a JWT is present."""
-
     if optional:
         try:
             verify_jwt_in_request(optional=True)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive
             return None
     else:
         verify_jwt_in_request()
 
-    identity = get_jwt_identity()
+    try:
+        identity = get_jwt_identity()
+    except RuntimeError:
+        return None
     if identity is None:
         return None
     return User.query.get(identity)
 
 
-def _forbidden(message: str):
-    return jsonify({"error": message}), 403
-
-
-def _str_to_bool(value: str) -> bool | None:
-    if value is None:
-        return None
-    value = value.lower()
-    if value in {"1", "true", "yes", "y"}:
-        return True
-    if value in {"0", "false", "no", "n"}:
-        return False
-    return None
-
-
-def _parse_iso_datetime(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:  # pragma: no cover - defensive
-        raise ValueError("Invalid ISO 8601 datetime") from exc
-
-
-def _can_access_listing(listing: Listing, user: User | None) -> bool:
+def _can_view_listing(listing: Listing, user: User | None) -> bool:
     if listing.is_public:
         return True
     if user is None:
@@ -71,31 +49,35 @@ def _can_access_listing(listing: Listing, user: User | None) -> bool:
     return bool(user.is_verified)
 
 
-def _visible_contact(listing: Listing, user: User | None) -> bool:
-    return _can_access_listing(listing, user)
+def _can_view_contact(listing: Listing, user: User | None) -> bool:
+    return _can_view_listing(listing, user)
 
 
-def _filter_visibility(query, user: User | None):
+def _can_modify_listing(listing: Listing, user: User | None) -> bool:
     if user is None:
-        return query.filter(Listing.is_public.is_(True))
-    if user.role == "admin":
-        return query
-    if user.is_verified:
-        return query
-    # Unverified users may only see public listings or ones they created.
-    return query.filter(
-        or_(
-            Listing.is_public.is_(True),
-            Listing.created_by == user.id,
-        )
-    )
+        return False
+    return user.role == "admin" or user.id == listing.created_by
+
+
+def _parse_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y"}:
+        return True
+    if lowered in {"0", "false", "no", "n"}:
+        return False
+    return None
 
 
 @listings_bp.route("", methods=["GET"])
-def list_listings():
-    """Return listings with optional search filters."""
+def search_listings():
+    """Return listings with optional filters."""
 
-    current_user = _get_current_user(optional=True)
+    user = _get_current_user(optional=True)
+
     query = Listing.query
 
     category = request.args.get("category")
@@ -106,24 +88,26 @@ def list_listings():
 
     search_term = request.args.get("q")
     if search_term:
-        like_pattern = f"%{search_term.lower()}%"
+        like = f"%{search_term.lower()}%"
         query = query.filter(
             or_(
-                db.func.lower(Listing.title).like(like_pattern),
-                db.func.lower(Listing.description).like(like_pattern),
-                db.func.lower(Listing.company_name).like(like_pattern),
+                db.func.lower(Listing.title).like(like),
+                db.func.lower(Listing.description).like(like),
+                db.func.lower(Listing.company_name).like(like),
             )
         )
 
     city = request.args.get("city")
     if city:
-        query = query.filter(db.func.lower(Listing.city).like(f"%{city.lower()}%"))
+        query = query.filter(
+            db.func.lower(Listing.location_city).like(f"%{city.lower()}%")
+        )
 
-    active_filter = request.args.get("active")
-    active_value = _str_to_bool(active_filter) if active_filter is not None else True
-    if active_value is True:
+    active_param = request.args.get("active", "true")
+    active = _parse_bool(active_param)
+    if active is True:
         query = Listing.active_filter(query)
-    elif active_value is False:
+    elif active is False:
         now = datetime.utcnow()
         query = query.filter(
             or_(
@@ -132,209 +116,180 @@ def list_listings():
             )
         )
 
-    query = _filter_visibility(query, current_user)
     listings = query.order_by(Listing.created_at.desc()).all()
 
     payload = []
     for listing in listings:
-        if not _can_access_listing(listing, current_user):
-            # Filter out private listings if the user lacks verification.
+        if not _can_view_listing(listing, user):
             continue
-        include_contact = _visible_contact(listing, current_user)
-        payload.append(listing.to_dict(include_private=include_contact))
+        payload.append(listing.to_dict(include_contact=_can_view_contact(listing, user)))
 
     return jsonify({"results": payload, "count": len(payload)})
+
+
+def _validate_listing_payload(data: dict, partial: bool = False):
+    errors = []
+
+    required_fields = ["category", "title", "description", "contact_method", "contact_value"]
+    if not partial:
+        for field in required_fields:
+            if not data.get(field):
+                errors.append(f"{field} is required")
+
+    category = data.get("category")
+    if category and category not in LISTING_CATEGORIES:
+        errors.append("category must be one of job, housing, ride, gig")
+
+    contact_method = data.get("contact_method")
+    if contact_method and contact_method not in CONTACT_METHODS:
+        errors.append("contact_method must be one of phone, email, in_app")
+
+    pay_rate = data.get("pay_rate")
+    pay_rate_decimal = None
+    if pay_rate not in (None, ""):
+        try:
+            pay_rate_decimal = Decimal(str(pay_rate))
+        except (InvalidOperation, TypeError):
+            errors.append("pay_rate must be numeric")
+
+    expires_at = data.get("expires_at")
+    expires_at_dt = None
+    if expires_at:
+        try:
+            expires_at_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append("expires_at must be ISO 8601 format")
+
+    return errors, pay_rate_decimal, expires_at_dt
 
 
 @listings_bp.route("", methods=["POST"])
 @jwt_required()
 def create_listing():
-    """Create a new listing (employers/admins only)."""
+    """Create a listing. Employers and admins only."""
 
-    current_user = _get_current_user()
-    if current_user is None:
-        return _forbidden("Authentication required.")
-    if current_user.role not in {"employer", "admin"}:
-        return _forbidden("Only employers or admins can create listings.")
+    user = _get_current_user()
+    if user is None or user.role not in {"employer", "admin"}:
+        return jsonify({"error": "Only employers or admins can create listings."}), 403
 
     data = request.get_json() or {}
-
-    errors = []
-    for field in ("category", "title", "description", "contact_method", "contact_value"):
-        if not data.get(field):
-            errors.append(f"{field} is required")
-
-    category = data.get("category")
-    if category and category not in LISTING_CATEGORIES:
-        errors.append("category must be one of jobs, housing, rides, gigs")
-
-    pay_rate_value = data.get("pay_rate")
-    pay_rate = None
-    if pay_rate_value not in (None, ""):
-        try:
-            pay_rate = Decimal(str(pay_rate_value))
-        except (InvalidOperation, TypeError):
-            errors.append("pay_rate must be a valid number")
-
-    expires_at_value = data.get("expires_at")
-    expires_at = None
-    if expires_at_value:
-        try:
-            expires_at = _parse_iso_datetime(expires_at_value)
-        except ValueError:
-            errors.append("expires_at must be ISO 8601 format")
-
+    errors, pay_rate, expires_at = _validate_listing_payload(data)
     if errors:
         return jsonify({"errors": errors}), 400
 
     listing = Listing(
-        category=category,
+        category=data.get("category"),
         title=data.get("title"),
         description=data.get("description"),
         company_name=data.get("company_name"),
         contact_method=data.get("contact_method"),
         contact_value=data.get("contact_value"),
-        city=data.get("city"),
+        location_city=data.get("location_city"),
         pay_rate=pay_rate,
         currency=data.get("currency"),
         shift=data.get("shift"),
-        is_public=bool(data.get("is_public", True)),
-        is_active=bool(data.get("is_active", True)),
+        is_public=_parse_bool(data.get("is_public"))
+        if data.get("is_public") is not None
+        else True,
+        is_active=_parse_bool(data.get("is_active"))
+        if data.get("is_active") is not None
+        else True,
         expires_at=expires_at,
-        created_by=current_user.id,
+        created_by=user.id,
     )
     db.session.add(listing)
     db.session.commit()
 
-    include_contact = _visible_contact(listing, current_user)
-    return jsonify(listing.to_dict(include_private=include_contact)), 201
+    return jsonify(listing.to_dict(include_contact=True)), 201
 
 
 @listings_bp.route("/<int:listing_id>", methods=["GET"])
 def get_listing(listing_id: int):
-    """Retrieve a single listing."""
-
     listing = Listing.query.get_or_404(listing_id)
-    current_user = _get_current_user(optional=True)
-    if not _can_access_listing(listing, current_user):
-        return _forbidden("Listing not available.")
+    user = _get_current_user(optional=True)
 
-    include_contact = _visible_contact(listing, current_user)
-    return jsonify(listing.to_dict(include_private=include_contact))
+    if not _can_view_listing(listing, user):
+        return jsonify({"error": "Not authorized to view this listing."}), 403
+
+    include_contact = _can_view_contact(listing, user)
+    return jsonify(listing.to_dict(include_contact=include_contact))
 
 
 @listings_bp.route("/<int:listing_id>", methods=["PATCH"])
 @jwt_required()
 def update_listing(listing_id: int):
-    """Update a listing (owner or admin)."""
-
     listing = Listing.query.get_or_404(listing_id)
-    current_user = _get_current_user()
-    if current_user is None:
-        return _forbidden("Authentication required.")
-    if current_user.role != "admin" and listing.created_by != current_user.id:
-        return _forbidden("Only the owner or an admin can update this listing.")
+    user = _get_current_user()
+    if not _can_modify_listing(listing, user):
+        return jsonify({"error": "You do not have permission to update this listing."}), 403
 
     data = request.get_json() or {}
-    allowed_fields = {
+    errors, pay_rate, expires_at = _validate_listing_payload(data, partial=True)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    for field in [
         "category",
         "title",
         "description",
         "company_name",
         "contact_method",
         "contact_value",
-        "city",
-        "pay_rate",
+        "location_city",
         "currency",
         "shift",
-        "is_public",
-        "is_active",
-        "expires_at",
-    }
+    ]:
+        if field in data and data[field] is not None:
+            setattr(listing, field, data[field])
 
-    errors = []
+    if pay_rate is not None:
+        listing.pay_rate = pay_rate
+    if "pay_rate" in data and data.get("pay_rate") in (None, ""):
+        listing.pay_rate = None
 
-    for key in data:
-        if key not in allowed_fields:
-            errors.append(f"{key} is not an updatable field")
-    if errors:
-        return jsonify({"errors": errors}), 400
-
-    if "category" in data:
-        if data["category"] not in LISTING_CATEGORIES:
-            errors.append("category must be one of jobs, housing, rides, gigs")
-        else:
-            listing.category = data["category"]
-
-    for attr in ("title", "description", "company_name", "contact_method", "contact_value", "city", "currency", "shift"):
-        if attr in data and data[attr] is not None:
-            setattr(listing, attr, data[attr])
+    if expires_at is not None:
+        listing.expires_at = expires_at
+    if "expires_at" in data and not data.get("expires_at"):
+        listing.expires_at = None
 
     if "is_public" in data:
-        listing.is_public = bool(data["is_public"])
+        parsed = _parse_bool(data.get("is_public"))
+        if parsed is None:
+            return jsonify({"errors": ["is_public must be boolean"]}), 400
+        listing.is_public = parsed
+
     if "is_active" in data:
-        listing.is_active = bool(data["is_active"])
-
-    if "pay_rate" in data:
-        if data["pay_rate"] in (None, ""):
-            listing.pay_rate = None
-        else:
-            try:
-                listing.pay_rate = Decimal(str(data["pay_rate"]))
-            except (InvalidOperation, TypeError):
-                errors.append("pay_rate must be a valid number")
-
-    if "expires_at" in data:
-        if data["expires_at"] in (None, ""):
-            listing.expires_at = None
-        else:
-            try:
-                listing.expires_at = _parse_iso_datetime(data["expires_at"])
-            except ValueError:
-                errors.append("expires_at must be ISO 8601 format")
-
-    if errors:
-        return jsonify({"errors": errors}), 400
+        parsed = _parse_bool(data.get("is_active"))
+        if parsed is None:
+            return jsonify({"errors": ["is_active must be boolean"]}), 400
+        listing.is_active = parsed
 
     db.session.commit()
-    include_contact = _visible_contact(listing, current_user)
-    return jsonify(listing.to_dict(include_private=include_contact))
+    include_contact = _can_view_contact(listing, user)
+    return jsonify(listing.to_dict(include_contact=include_contact))
 
 
 @listings_bp.route("/<int:listing_id>/apply", methods=["POST"])
 @jwt_required()
 def apply_to_listing(listing_id: int):
-    """Allow a worker to apply to a listing."""
-
     listing = Listing.query.get_or_404(listing_id)
-    current_user = _get_current_user()
-    if current_user is None:
-        return _forbidden("Authentication required.")
-    if current_user.role not in {"worker", "user"}:
-        return _forbidden("Only workers can apply to listings.")
-    if not _can_access_listing(listing, current_user):
-        return _forbidden("You are not allowed to view this listing.")
+    user = _get_current_user()
 
-    now = datetime.utcnow()
-    if not listing.is_active or (listing.expires_at and listing.expires_at < now):
-        return jsonify({"error": "This listing is not accepting applications."}), 400
+    if user is None or user.role != "worker":
+        return jsonify({"error": "Only workers can apply to listings."}), 403
+
+    if not _can_view_listing(listing, user):
+        return jsonify({"error": "You must be verified to apply to this listing."}), 403
+
+    if not listing.is_active:
+        return jsonify({"error": "Listing is not active."}), 400
 
     data = request.get_json() or {}
-    message = (data.get("message") or "").strip()
+    message = data.get("message")
     if not message:
         return jsonify({"error": "message is required"}), 400
 
-    already_applied = Application.query.filter_by(
-        user_id=current_user.id, listing_id=listing.id
-    ).first()
-    if already_applied:
-        return jsonify({"error": "You have already applied to this listing."}), 400
-
-    application = Application(
-        user_id=current_user.id,
-        listing_id=listing.id,
-        message=message,
-    )
+    application = Application(user_id=user.id, listing_id=listing.id, message=message)
     db.session.add(application)
     db.session.commit()
 

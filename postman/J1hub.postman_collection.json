@@ -1,0 +1,316 @@
+{
+  "info": {
+    "name": "J1hub API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Collection covering verification and listings workflows."
+  },
+  "item": [
+    {
+      "name": "Verify - Upload Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "doc_type",
+              "value": "passport",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": "{{path_to_passport}}"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/verify/upload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "verify",
+            "upload"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Verify - Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/verify/status",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "verify",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Pending Documents",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{admin_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/admin/verify/pending",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "admin",
+            "verify",
+            "pending"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Approve Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{admin_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"Approved by admin\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/admin/verify/{{document_id}}/approve",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "admin",
+            "verify",
+            "{{document_id}}",
+            "approve"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Deny Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{admin_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"Document missing signature\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/admin/verify/{{document_id}}/deny",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "admin",
+            "verify",
+            "{{document_id}}",
+            "deny"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Listings - Search",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/listings?category=job&q=server&city=new%20york",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "listings"
+          ],
+          "query": [
+            {
+              "key": "category",
+              "value": "job"
+            },
+            {
+              "key": "q",
+              "value": "server"
+            },
+            {
+              "key": "city",
+              "value": "new york"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Listings - Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{employer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"category\": \"job\",\n  \"title\": \"Seasonal Server\",\n  \"description\": \"Serve guests at resort events.\",\n  \"company_name\": \"Sunshine Resort\",\n  \"contact_method\": \"email\",\n  \"contact_value\": \"hr@sunshine.example\",\n  \"location_city\": \"Miami\",\n  \"pay_rate\": 18.5,\n  \"currency\": \"USD\",\n  \"shift\": \"Evenings\",\n  \"is_public\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/listings",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "listings"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Listings - Get by ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{worker_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/listings/{{listing_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "listings",
+            "{{listing_id}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Listings - Update",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{employer_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pay_rate\": 19.25,\n  \"is_active\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/listings/{{listing_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "listings",
+            "{{listing_id}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Listings - Apply",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{worker_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"I have three seasons of experience.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/listings/{{listing_id}}/apply",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "listings",
+            "{{listing_id}}",
+            "apply"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000"
+    }
+  ]
+}
