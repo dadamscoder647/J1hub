@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -97,6 +98,65 @@ def test_status_endpoint_returns_latest_document(app, client):
     payload = response.get_json()
     assert payload["verification_status"] == "approved"
     assert payload["latest_document"]["filename"] == "second.pdf"
+
+
+def test_admin_list_pending_documents_returns_only_pending(app, client):
+    """Admin pending list returns only pending documents with expected fields."""
+
+    with app.app_context():
+        admin = _create_user("admin-list@example.com", role="admin")
+        worker_one = _create_user("pending1@example.com")
+        worker_two = _create_user("pending2@example.com")
+        worker_three = _create_user("approved@example.com")
+        older_time = datetime.utcnow() - timedelta(days=1)
+        newer_time = datetime.utcnow()
+        pending_old = VisaDocument(
+            user_id=worker_one.id,
+            filename="old.pdf",
+            file_path="old.pdf",
+            file_type="application/pdf",
+            status="pending",
+            waiver_acknowledged=True,
+            created_at=older_time,
+        )
+        pending_new = VisaDocument(
+            user_id=worker_two.id,
+            filename="new.pdf",
+            file_path="new.pdf",
+            file_type="application/pdf",
+            status="pending",
+            waiver_acknowledged=True,
+            created_at=newer_time,
+        )
+        approved = VisaDocument(
+            user_id=worker_three.id,
+            filename="approved.pdf",
+            file_path="approved.pdf",
+            file_type="application/pdf",
+            status="approved",
+            waiver_acknowledged=True,
+        )
+        db.session.add_all([pending_old, pending_new, approved])
+        db.session.commit()
+        admin_id = admin.id
+        pending_old_id = pending_old.id
+        pending_new_id = pending_new.id
+
+    response = client.get(
+        "/admin/verify/pending",
+        headers=_auth_headers(app, admin_id),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload, list)
+    assert [item["id"] for item in payload] == [pending_old_id, pending_new_id]
+    for item in payload:
+        assert set(item.keys()) == {"id", "user_id", "filename", "created_at"}
+        assert item["created_at"] is not None
+        # Ensure ISO-8601 parseable string
+        parsed = datetime.fromisoformat(item["created_at"])
+        assert isinstance(parsed, datetime)
 
 
 def test_admin_can_download_document(app, client):
@@ -236,6 +296,10 @@ def test_non_admin_cannot_access_admin_routes(app, client):
         f"/verify/doc/{document_id}",
         headers=_auth_headers(app, worker_id),
     )
+    response_pending = client.get(
+        "/admin/verify/pending",
+        headers=_auth_headers(app, worker_id),
+    )
     response_approve = client.post(
         f"/verify/{document_id}/approve",
         headers=_auth_headers(app, worker_id),
@@ -246,5 +310,6 @@ def test_non_admin_cannot_access_admin_routes(app, client):
     )
 
     assert response_doc.status_code == 403
+    assert response_pending.status_code == 403
     assert response_approve.status_code == 403
     assert response_reject.status_code == 403

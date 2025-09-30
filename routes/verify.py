@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from flask import Blueprint, current_app, jsonify, request, send_file
+from flask.typing import ResponseReturnValue
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound
@@ -200,6 +201,40 @@ def download_document(document_id: int):
         mimetype=document.file_type or "application/octet-stream",
         as_attachment=True,
         download_name=document.filename,
+    )
+
+
+def _serialize_pending_document(document: VisaDocument) -> dict[str, object]:
+    return {
+        "id": document.id,
+        "user_id": document.user_id,
+        "filename": document.filename,
+        "created_at": document.created_at.isoformat() if document.created_at else None,
+    }
+
+
+def list_pending_documents() -> ResponseReturnValue:
+    """Return a list of pending visa documents for admin review."""
+
+    _require_admin()
+
+    pending_documents = (
+        VisaDocument.query.filter_by(status="pending")
+        .order_by(VisaDocument.created_at.asc())
+        .all()
+    )
+
+    return jsonify([_serialize_pending_document(document) for document in pending_documents])
+
+
+@verify_bp.record_once
+def _register_admin_routes(state) -> None:  # pragma: no cover - registration hook
+    app = state.app
+    app.add_url_rule(
+        "/admin/verify/pending",
+        view_func=jwt_required()(list_pending_documents),
+        methods=["GET"],
+        endpoint="verify.list_pending_documents",
     )
 
 
