@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
+from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 from models import db
 from models.user import User
 from models.visa_document import DOC_TYPES, VISA_STATUSES, VisaDocument
 from storage.local_storage import LocalStorage
+from utils.request_validation import parse_json_request
 
 verify_bp = Blueprint("verify", __name__)
 admin_bp = Blueprint("admin_verify", __name__)
@@ -41,24 +42,24 @@ def upload_document():
 
     user = _get_current_user()
     if user is None:
-        return jsonify({"error": "User not found."}), 404
+        raise NotFound("User not found.")
 
     file = request.files.get("file")
     if file is None or file.filename == "":
-        return jsonify({"error": "A file is required."}), 400
+        raise BadRequest("A file is required.")
 
     if not _allowed_file(file.filename):
-        return jsonify({"error": "File type not allowed."}), 400
+        raise BadRequest("File type not allowed.")
 
     doc_type = request.form.get("doc_type", "passport").lower()
     if doc_type not in DOC_TYPES:
-        return jsonify({"error": "doc_type must be passport or j1_visa."}), 400
+        raise BadRequest("doc_type must be passport or j1_visa.")
 
     file.stream.seek(0, os.SEEK_END)
     size = file.stream.tell()
     file.stream.seek(0)
     if size > MAX_FILE_SIZE:
-        return jsonify({"error": "File exceeds 10MB limit."}), 400
+        raise BadRequest("File exceeds 10MB limit.")
 
     storage = LocalStorage(current_app.config["UPLOAD_DIR"])
     saved_path = storage.save(file, file.filename)
@@ -82,7 +83,7 @@ def verification_status():
 
     user = _get_current_user()
     if user is None:
-        return jsonify({"error": "User not found."}), 404
+        raise NotFound("User not found.")
 
     latest_document = (
         VisaDocument.query.filter_by(user_id=user.id)
@@ -98,22 +99,19 @@ def verification_status():
     )
 
 
-def _require_admin() -> Tuple[User, None] | Tuple[None, Tuple[str, int]]:
+def _require_admin() -> User:
     user = _get_current_user()
     if user is None:
-        return None, ("User not found.", 404)
+        raise NotFound("User not found.")
     if user.role != "admin":
-        return None, ("Admin privileges required.", 403)
-    return user, None
+        raise Forbidden("Admin privileges required.")
+    return user
 
 
 @admin_bp.route("/verify/pending", methods=["GET"])
 @jwt_required()
 def admin_pending():
-    user, error = _require_admin()
-    if error:
-        message, status_code = error
-        return jsonify({"error": message}), status_code
+    _require_admin()
 
     pending_documents = (
         VisaDocument.query.filter_by(status="pending")
@@ -128,16 +126,19 @@ def admin_pending():
     )
 
 
-def _update_document_status(document_id: int, status: str):
+def _update_document_status(document_id: int, status: str) -> VisaDocument:
     if status not in VISA_STATUSES:
-        return None, ("Invalid status.", 400)
+        raise BadRequest("Invalid status.")
 
     document = VisaDocument.query.get(document_id)
     if document is None:
-        return None, ("Document not found.", 404)
+        raise NotFound("Document not found.")
 
-    payload = request.get_json() or {}
-    notes = payload.get("notes")
+    payload = {}
+    if request.content_length and request.content_length > 0:
+        payload = parse_json_request(request, allow_empty=True)
+
+    notes = payload.get("notes") if isinstance(payload, dict) else None
 
     document.status = status
     document.notes = notes
@@ -148,21 +149,15 @@ def _update_document_status(document_id: int, status: str):
         document.user.is_verified = False
 
     db.session.commit()
-    return document, None
+    return document
 
 
 @admin_bp.route("/verify/<int:document_id>/approve", methods=["POST"])
 @jwt_required()
 def admin_approve(document_id: int):
-    _, error = _require_admin()
-    if error:
-        message, status_code = error
-        return jsonify({"error": message}), status_code
+    _require_admin()
 
-    document, doc_error = _update_document_status(document_id, "approved")
-    if doc_error:
-        message, status_code = doc_error
-        return jsonify({"error": message}), status_code
+    document = _update_document_status(document_id, "approved")
 
     return jsonify({"document": document.to_dict()}), 200
 
@@ -170,14 +165,8 @@ def admin_approve(document_id: int):
 @admin_bp.route("/verify/<int:document_id>/deny", methods=["POST"])
 @jwt_required()
 def admin_deny(document_id: int):
-    _, error = _require_admin()
-    if error:
-        message, status_code = error
-        return jsonify({"error": message}), status_code
+    _require_admin()
 
-    document, doc_error = _update_document_status(document_id, "denied")
-    if doc_error:
-        message, status_code = doc_error
-        return jsonify({"error": message}), status_code
+    document = _update_document_status(document_id, "denied")
 
     return jsonify({"document": document.to_dict()}), 200
