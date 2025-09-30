@@ -4,9 +4,11 @@ from http import HTTPStatus
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token
+from werkzeug.exceptions import BadRequest, Conflict, Unauthorized
 
 from models import db
 from models.user import User
+from utils.request_validation import parse_json_request
 
 ALLOWED_ROLES = {"worker", "employer", "admin"}
 
@@ -33,28 +35,19 @@ def _extract_role(raw_role: str | None) -> str:
 def register() -> tuple:
     """Register a new user with an email, password, and optional role."""
 
-    payload = request.get_json(silent=True) or {}
+    payload = parse_json_request(request)
     email = _normalize_email(payload.get("email"))
     password = (payload.get("password") or "").strip()
     role = _extract_role(payload.get("role")) or getattr(User.role.default, "arg", "worker")
 
     if not email or not password:
-        return (
-            jsonify({"error": "Email and password are required."}),
-            HTTPStatus.BAD_REQUEST,
-        )
+        raise BadRequest("Email and password are required.")
 
     if payload.get("role") and role not in ALLOWED_ROLES:
-        return (
-            jsonify({"error": "Role must be one of: worker, employer, admin."}),
-            HTTPStatus.BAD_REQUEST,
-        )
+        raise BadRequest("Role must be one of: worker, employer, admin.")
 
     if User.query.filter_by(email=email).first() is not None:
-        return (
-            jsonify({"error": "A user with that email already exists."}),
-            HTTPStatus.CONFLICT,
-        )
+        raise Conflict("A user with that email already exists.")
 
     user = User(email=email, role=role)
     user.set_password(password)
@@ -77,22 +70,16 @@ def register() -> tuple:
 def login() -> tuple:
     """Authenticate a user and return a JWT access token."""
 
-    payload = request.get_json(silent=True) or {}
+    payload = parse_json_request(request)
     email = _normalize_email(payload.get("email"))
     password = (payload.get("password") or "").strip()
 
     if not email or not password:
-        return (
-            jsonify({"error": "Email and password are required."}),
-            HTTPStatus.BAD_REQUEST,
-        )
+        raise BadRequest("Email and password are required.")
 
     user = User.query.filter_by(email=email).first()
     if user is None or not user.check_password(password):
-        return (
-            jsonify({"error": "Invalid email or password."}),
-            HTTPStatus.UNAUTHORIZED,
-        )
+        raise Unauthorized("Invalid email or password.")
 
     access_token = create_access_token(identity=user.id)
 

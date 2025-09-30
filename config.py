@@ -15,3 +15,13 @@ class Config:
     UPLOAD_DIR = os.getenv(
         "UPLOAD_DIR", str(Path("workspace") / "uploads")
     )
+    _raw_origins = os.getenv("ORIGINS", "*")
+    if _raw_origins == "*":
+        CORS_ORIGINS = "*"
+    else:
+        CORS_ORIGINS = [
+            origin.strip()
+            for origin in _raw_origins.split(",")
+            if origin.strip()
+        ]
+    RATE_LIMIT = os.getenv("RATE_LIMIT", "60 per minute")

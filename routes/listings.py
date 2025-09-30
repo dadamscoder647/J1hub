@@ -12,11 +12,13 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 from sqlalchemy import and_, or_
+from werkzeug.exceptions import BadRequest, Forbidden
 
 from models import db
 from models.application import Application
 from models.listing import CONTACT_METHODS, LISTING_CATEGORIES, Listing
 from models.user import User
+from utils.request_validation import parse_json_request
 
 listings_bp = Blueprint("listings", __name__)
 
@@ -83,7 +85,7 @@ def search_listings():
     category = request.args.get("category")
     if category:
         if category not in LISTING_CATEGORIES:
-            return jsonify({"error": "Invalid category."}), 400
+            raise BadRequest("Invalid category.")
         query = query.filter(Listing.category == category)
 
     search_term = request.args.get("q")
@@ -170,12 +172,12 @@ def create_listing():
 
     user = _get_current_user()
     if user is None or user.role not in {"employer", "admin"}:
-        return jsonify({"error": "Only employers or admins can create listings."}), 403
+        raise Forbidden("Only employers or admins can create listings.")
 
-    data = request.get_json() or {}
+    data = parse_json_request(request)
     errors, pay_rate, expires_at = _validate_listing_payload(data)
     if errors:
-        return jsonify({"errors": errors}), 400
+        raise BadRequest("; ".join(errors))
 
     listing = Listing(
         category=data.get("category"),
@@ -209,7 +211,7 @@ def get_listing(listing_id: int):
     user = _get_current_user(optional=True)
 
     if not _can_view_listing(listing, user):
-        return jsonify({"error": "Not authorized to view this listing."}), 403
+        raise Forbidden("Not authorized to view this listing.")
 
     include_contact = _can_view_contact(listing, user)
     return jsonify(listing.to_dict(include_contact=include_contact))
@@ -221,12 +223,12 @@ def update_listing(listing_id: int):
     listing = Listing.query.get_or_404(listing_id)
     user = _get_current_user()
     if not _can_modify_listing(listing, user):
-        return jsonify({"error": "You do not have permission to update this listing."}), 403
+        raise Forbidden("You do not have permission to update this listing.")
 
-    data = request.get_json() or {}
+    data = parse_json_request(request, allow_empty=False)
     errors, pay_rate, expires_at = _validate_listing_payload(data, partial=True)
     if errors:
-        return jsonify({"errors": errors}), 400
+        raise BadRequest("; ".join(errors))
 
     for field in [
         "category",
@@ -255,13 +257,13 @@ def update_listing(listing_id: int):
     if "is_public" in data:
         parsed = _parse_bool(data.get("is_public"))
         if parsed is None:
-            return jsonify({"errors": ["is_public must be boolean"]}), 400
+            raise BadRequest("is_public must be boolean")
         listing.is_public = parsed
 
     if "is_active" in data:
         parsed = _parse_bool(data.get("is_active"))
         if parsed is None:
-            return jsonify({"errors": ["is_active must be boolean"]}), 400
+            raise BadRequest("is_active must be boolean")
         listing.is_active = parsed
 
     db.session.commit()
@@ -276,18 +278,18 @@ def apply_to_listing(listing_id: int):
     user = _get_current_user()
 
     if user is None or user.role != "worker":
-        return jsonify({"error": "Only workers can apply to listings."}), 403
+        raise Forbidden("Only workers can apply to listings.")
 
     if not _can_view_listing(listing, user):
-        return jsonify({"error": "You must be verified to apply to this listing."}), 403
+        raise Forbidden("You must be verified to apply to this listing.")
 
     if not listing.is_active:
-        return jsonify({"error": "Listing is not active."}), 400
+        raise BadRequest("Listing is not active.")
 
-    data = request.get_json() or {}
+    data = parse_json_request(request)
     message = data.get("message")
     if not message:
-        return jsonify({"error": "message is required"}), 400
+        raise BadRequest("message is required")
 
     application = Application(user_id=user.id, listing_id=listing.id, message=message)
     db.session.add(application)
