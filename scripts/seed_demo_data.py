@@ -10,15 +10,28 @@ from models.listing import Listing
 from models.user import User
 
 
-def get_or_create_user(email: str, role: str, password: str, is_verified: bool = False) -> User:
+def get_or_create_user(
+    email: str,
+    role: str,
+    password: str,
+    is_verified: bool = False,
+) -> User:
+    status = "approved" if is_verified else "unverified"
     user = User.query.filter_by(email=email).first()
     if user is None:
-        user = User(email=email, role=role, is_verified=is_verified)
+        user = User(
+            email=email,
+            role=role,
+            is_verified=is_verified,
+            verification_status=status,
+        )
         user.set_password(password)
         db.session.add(user)
     else:
         user.role = role
-        user.is_verified = is_verified if role != "admin" else user.is_verified
+        if role != "admin":
+            user.is_verified = is_verified
+            user.verification_status = status
         user.set_password(password)
     return user
 

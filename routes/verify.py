@@ -1,24 +1,27 @@
-"""Visa verification routes."""
+"""Verification blueprint for visa document uploads and review."""
 
 from __future__ import annotations
 
 import os
+import uuid
+from pathlib import Path
+from typing import Iterable
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
+from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 from models import db
 from models.user import User
-from models.visa_document import VISA_DOCUMENT_STATUSES, VisaDocument
+from models.visa_document import VisaDocument
 from storage.local_storage import LocalStorage
 from utils.request_validation import parse_json_request
 
 verify_bp = Blueprint("verify", __name__)
-admin_bp = Blueprint("admin_verify", __name__)
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "pdf"}
+MAX_UPLOAD_SIZE_DEFAULT = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS_DEFAULT = {"jpeg", "jpg", "png", "pdf"}
 
 
 def _get_current_user() -> User | None:
@@ -28,58 +31,142 @@ def _get_current_user() -> User | None:
         return None
     if identity is None:
         return None
-    return User.query.get(identity)
+    user_id = identity
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        pass
+    return User.query.get(user_id)
 
 
-def _allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def _require_user() -> User:
+    user = _get_current_user()
+    if user is None:
+        raise NotFound("User not found.")
+    return user
+
+
+def _require_admin() -> User:
+    user = _require_user()
+    if user.role != "admin":
+        raise Forbidden("Admin privileges required.")
+    return user
+
+
+def _parse_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def _allowed_extensions() -> set[str]:
+    configured = current_app.config.get("ALLOWED_UPLOAD_TYPES")
+    if not configured:
+        return set(ALLOWED_EXTENSIONS_DEFAULT)
+    if isinstance(configured, str):
+        values: Iterable[str] = configured.split(",")
+    else:
+        values = configured
+    normalized = {
+        item.strip().lower().lstrip(".")
+        for item in values
+        if isinstance(item, str) and item.strip()
+    }
+    if not normalized:
+        return set(ALLOWED_EXTENSIONS_DEFAULT)
+    if "jpeg" in normalized:
+        normalized.add("jpg")
+    if "jpg" in normalized:
+        normalized.add("jpeg")
+    return normalized
+
+
+def _validate_document(file: FileStorage) -> None:
+    if file.filename is None or file.filename.strip() == "":
+        raise BadRequest("A document file is required.")
+
+    extension = file.filename.rsplit(".", 1)[-1].lower()
+    if extension not in _allowed_extensions():
+        allowed = ", ".join(sorted(_allowed_extensions()))
+        raise BadRequest(f"File type not allowed. Allowed types: {allowed}.")
+
+    max_size = int(current_app.config.get("MAX_UPLOAD_SIZE", MAX_UPLOAD_SIZE_DEFAULT))
+    file.stream.seek(0, os.SEEK_END)
+    size = file.stream.tell()
+    file.stream.seek(0)
+    if size > max_size:
+        raise BadRequest("File exceeds the maximum upload size of 10MB.")
+
+
+def _build_unique_filename(original: str) -> str:
+    suffix = Path(original).suffix
+    if not suffix:
+        suffix = ""
+    return f"{uuid.uuid4().hex}{suffix}"
+
+
+def _get_document_or_404(document_id: int) -> VisaDocument:
+    document = VisaDocument.query.get(document_id)
+    if document is None:
+        raise NotFound("Document not found.")
+    return document
+
+
+def _update_user_status(user: User, status: str) -> None:
+    user.verification_status = status
+    user.is_verified = status == "approved"
 
 
 @verify_bp.route("/upload", methods=["POST"])
 @jwt_required()
 def upload_document():
-    """Upload a visa document for verification."""
+    """Upload a document for verification and create a pending record."""
 
-    user = _get_current_user()
-    if user is None:
-        raise NotFound("User not found.")
+    user = _require_user()
 
-    file = request.files.get("file")
-    if file is None or file.filename == "":
-        raise BadRequest("A file is required.")
+    file = request.files.get("document")
+    if not isinstance(file, FileStorage):
+        raise BadRequest("A document file is required.")
 
-    if not _allowed_file(file.filename):
-        raise BadRequest("File type not allowed.")
+    _validate_document(file)
 
-    file.stream.seek(0, os.SEEK_END)
-    size = file.stream.tell()
-    file.stream.seek(0)
-    if size > MAX_FILE_SIZE:
-        raise BadRequest("File exceeds 10MB limit.")
+    waiver_value = _parse_bool(request.form.get("waiver"))
+    if waiver_value is None:
+        raise BadRequest("waiver must be provided as a boolean value.")
 
-    storage = LocalStorage(current_app.config["UPLOAD_DIR"])
-    saved_path = storage.save(file, file.filename)
+    storage = LocalStorage(current_app.config.get("UPLOAD_DIR"))
+    stored_filename = _build_unique_filename(file.filename or "document")
+    stored_path = storage.save(file, stored_filename)
 
     document = VisaDocument(
         user_id=user.id,
-        filename=file.filename,
-        file_path=saved_path,
+        filename=file.filename or stored_filename,
+        file_path=stored_path,
         file_type=file.mimetype or "application/octet-stream",
+        waiver_acknowledged=waiver_value,
+        status="pending",
     )
+
     db.session.add(document)
+    _update_user_status(user, "pending")
     db.session.commit()
 
-    return jsonify({"document": document.to_dict()}), 201
+    return jsonify({"id": document.id, "status": document.status}), 201
 
 
 @verify_bp.route("/status", methods=["GET"])
 @jwt_required()
 def verification_status():
-    """Return the verification status for the current user."""
+    """Return the verification status and latest document metadata."""
 
-    user = _get_current_user()
-    if user is None:
-        raise NotFound("User not found.")
+    user = _require_user()
 
     latest_document = (
         VisaDocument.query.filter_by(user_id=user.id)
@@ -89,84 +176,84 @@ def verification_status():
 
     return jsonify(
         {
-            "is_verified": user.is_verified,
+            "verification_status": user.verification_status,
             "latest_document": latest_document.to_dict() if latest_document else None,
         }
     )
 
 
-def _require_admin() -> User:
-    user = _get_current_user()
-    if user is None:
-        raise NotFound("User not found.")
-    if user.role != "admin":
-        raise Forbidden("Admin privileges required.")
-    return user
-
-
-@admin_bp.route("/verify/pending", methods=["GET"])
+@verify_bp.route("/doc/<int:document_id>", methods=["GET"])
 @jwt_required()
-def admin_pending():
-    _require_admin()
+def download_document(document_id: int):
+    """Allow an administrator to download a stored verification document."""
 
-    pending_documents = (
-        VisaDocument.query.filter_by(status="pending")
-        .order_by(VisaDocument.created_at.asc())
-        .all()
+    _require_admin()
+    document = _get_document_or_404(document_id)
+
+    storage = LocalStorage(current_app.config.get("UPLOAD_DIR"))
+    if not storage.exists(document.file_path):
+        raise NotFound("Stored file could not be found.")
+
+    absolute_path = storage.base_directory / document.file_path
+    return send_file(
+        absolute_path,
+        mimetype=document.file_type or "application/octet-stream",
+        as_attachment=True,
+        download_name=document.filename,
     )
+
+
+@verify_bp.route("/<int:document_id>/approve", methods=["POST"])
+@jwt_required()
+def approve_document(document_id: int):
+    """Approve a document and mark the associated user as verified."""
+
+    reviewer = _require_admin()
+    document = _get_document_or_404(document_id)
+
+    document.status = "approved"
+    document.review_note = None
+    document.reviewer_id = reviewer.id
+    _update_user_status(document.user, "approved")
+
+    db.session.commit()
+
     return jsonify(
         {
-            "pending": [doc.to_dict() for doc in pending_documents],
-            "count": len(pending_documents),
+            "id": document.id,
+            "status": document.status,
+            "verification_status": document.user.verification_status,
         }
     )
 
 
-def _update_document_status(document_id: int, status: str) -> VisaDocument:
-    if status not in VISA_DOCUMENT_STATUSES:
-        raise BadRequest("Invalid status.")
+@verify_bp.route("/<int:document_id>/reject", methods=["POST"])
+@jwt_required()
+def reject_document(document_id: int):
+    """Reject a document, capturing an optional review note."""
 
-    document = VisaDocument.query.get(document_id)
-    if document is None:
-        raise NotFound("Document not found.")
+    reviewer = _require_admin()
+    document = _get_document_or_404(document_id)
 
-    payload = {}
+    review_note = None
     if request.content_length and request.content_length > 0:
+        if request.mimetype != "application/json":
+            raise BadRequest("Review notes must be submitted as JSON.")
         payload = parse_json_request(request, allow_empty=True)
+        review_note = payload.get("review_note") or payload.get("note")
 
-    notes = None
-    if isinstance(payload, dict):
-        notes = payload.get("notes")
-
-    document.status = status
-    document.review_note = notes
-    reviewer = _get_current_user()
-    document.reviewer_id = reviewer.id if reviewer else None
-
-    if status == "approved":
-        document.user.is_verified = True
-    elif status == "rejected":
-        document.user.is_verified = False
+    document.status = "rejected"
+    document.review_note = review_note
+    document.reviewer_id = reviewer.id
+    _update_user_status(document.user, "rejected")
 
     db.session.commit()
-    return document
 
-
-@admin_bp.route("/verify/<int:document_id>/approve", methods=["POST"])
-@jwt_required()
-def admin_approve(document_id: int):
-    _require_admin()
-
-    document = _update_document_status(document_id, "approved")
-
-    return jsonify({"document": document.to_dict()}), 200
-
-
-@admin_bp.route("/verify/<int:document_id>/deny", methods=["POST"])
-@jwt_required()
-def admin_deny(document_id: int):
-    _require_admin()
-
-    document = _update_document_status(document_id, "rejected")
-
-    return jsonify({"document": document.to_dict()}), 200
+    return jsonify(
+        {
+            "id": document.id,
+            "status": document.status,
+            "verification_status": document.user.verification_status,
+            "review_note": document.review_note,
+        }
+    )

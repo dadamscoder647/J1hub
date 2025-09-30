@@ -31,6 +31,12 @@ class VisaDocument(db.Model):
     )
     reviewer_id = db.Column(db.Integer, nullable=True)
     review_note = db.Column(db.Text, nullable=True)
+    waiver_acknowledged = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.text("0"),
+    )
     created_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -60,5 +66,6 @@ class VisaDocument(db.Model):
             "status": self.status,
             "reviewer_id": self.reviewer_id,
             "review_note": self.review_note,
+            "waiver_acknowledged": self.waiver_acknowledged,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
