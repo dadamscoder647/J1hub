@@ -25,7 +25,11 @@ class User(db.Model):
         db.String(32),
         nullable=False,
         default="unverified",
-        server_default=db.text("'unverified'"),
+    )
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
     )
     is_active = db.Column(
         db.Boolean,
