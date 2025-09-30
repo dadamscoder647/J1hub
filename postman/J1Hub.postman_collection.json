@@ -1,0 +1,382 @@
+{
+  "info": {
+    "name": "J1Hub Core Flows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Covers authentication, verification, and listings workflows for the J1Hub API."
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login - Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('returns access token', function () {",
+                  "    pm.expect(json).to.have.property('access_token');",
+                  "});",
+                  "pm.collectionVariables.set('admin_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login - Employer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{employer_email}}\",\n  \"password\": \"{{employer_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('returns access token', function () {",
+                  "    pm.expect(json).to.have.property('access_token');",
+                  "});",
+                  "pm.collectionVariables.set('employer_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login - Worker",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{worker_email}}\",\n  \"password\": \"{{worker_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('returns access token', function () {",
+                  "    pm.expect(json).to.have.property('access_token');",
+                  "});",
+                  "pm.collectionVariables.set('worker_token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Verification",
+      "item": [
+        {
+          "name": "Upload Verification Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{worker_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "doc_type",
+                  "value": "passport",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{verification_document}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/verify/upload",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "verify",
+                "upload"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Check Verification Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{worker_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/verify/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "verify",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Approve Verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Approved via Postman collection.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/verify/{{document_id}}/approve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "verify",
+                "{{document_id}}",
+                "approve"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Listings",
+      "item": [
+        {
+          "name": "Search Listings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/listings?q={{search_term}}&city={{search_city}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "listings"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{search_term}}"
+                },
+                {
+                  "key": "city",
+                  "value": "{{search_city}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{employer_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"job\",\n  \"title\": \"Seasonal Server\",\n  \"description\": \"Serve guests at the beachfront resort.\",\n  \"company_name\": \"Sunshine Resort\",\n  \"contact_method\": \"email\",\n  \"contact_value\": \"hr@sunshine.example\",\n  \"location_city\": \"Miami\",\n  \"pay_rate\": 18.5,\n  \"currency\": \"USD\",\n  \"shift\": \"Evenings\",\n  \"is_public\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/listings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "listings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Apply to Listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{worker_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I have three seasons of hospitality experience.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/listings/{{listing_id}}/apply",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "listings",
+                "{{listing_id}}",
+                "apply"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000"
+    },
+    {
+      "key": "admin_email",
+      "value": "admin@example.com"
+    },
+    {
+      "key": "admin_password",
+      "value": "AdminPass123"
+    },
+    {
+      "key": "employer_email",
+      "value": "employer@example.com"
+    },
+    {
+      "key": "employer_password",
+      "value": "EmployerPass123"
+    },
+    {
+      "key": "worker_email",
+      "value": "worker@example.com"
+    },
+    {
+      "key": "worker_password",
+      "value": "WorkerPass123"
+    },
+    {
+      "key": "verification_document",
+      "value": "/path/to/passport.pdf"
+    },
+    {
+      "key": "document_id",
+      "value": "1"
+    },
+    {
+      "key": "listing_id",
+      "value": "1"
+    },
+    {
+      "key": "search_term",
+      "value": "server"
+    },
+    {
+      "key": "search_city",
+      "value": "Miami"
+    }
+  ]
+}
