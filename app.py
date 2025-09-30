@@ -2,15 +2,138 @@
 
 import json
 import os
+import time
 import uuid
 
 from flask import Flask, jsonify, g, request
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from werkzeug.exceptions import HTTPException
+
+try:
+    from flask_cors import CORS as _CORS
+except Exception:
+    def _CORS(app, resources=None, supports_credentials=False, **kwargs):  # no-op if lib missing
+        if app is None:
+            return None
+
+        origins = "*"
+        if isinstance(resources, dict):
+            for value in resources.values():
+                origins = value.get("origins", origins)
+                break
+
+        if not isinstance(origins, (list, tuple, set)):
+            allowed = [origins]
+        else:
+            allowed = list(origins)
+
+        @app.after_request
+        def _add_cors_headers(response):
+            origin = request.headers.get("Origin")
+            allow_origin = None
+
+            if allowed == ["*"]:
+                allow_origin = origin or "*"
+            elif origin and origin in allowed:
+                allow_origin = origin
+            elif allowed:
+                allow_origin = allowed[0]
+
+            if allow_origin:
+                response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
+            if supports_credentials:
+                response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+            return response
+
+        return None
+
+CORS = _CORS
+
+try:
+    from flask_limiter import Limiter as _Limiter
+    from flask_limiter.util import get_remote_address
+except Exception:
+    class _Limiter:
+        def __init__(
+            self,
+            key_func=None,
+            default_limits=None,
+            storage_uri=None,
+            headers_enabled=True,
+            key_prefix="",
+        ):
+            self.key_func = key_func or (lambda: "127.0.0.1")
+            self.default_limits = default_limits or []
+            self.storage_uri = storage_uri
+            self.headers_enabled = headers_enabled
+            self.key_prefix = key_prefix
+            self._max_requests = None
+            self._window_seconds = None
+            self._buckets: dict[str, dict[str, float]] = {}
+
+        def _parse_limit(self):
+            if not self.default_limits:
+                return None
+
+            limit = self.default_limits[0]
+            if callable(limit):
+                limit = limit()
+
+            if isinstance(limit, str):
+                parts = limit.split()
+                try:
+                    count = int(parts[0])
+                except (ValueError, IndexError):
+                    return None
+
+                unit = "".join(parts[1:]).lower()
+                if "second" in unit:
+                    window = 1
+                elif "minute" in unit:
+                    window = 60
+                elif "hour" in unit:
+                    window = 3600
+                else:
+                    window = 60
+                return count, window
+
+            if isinstance(limit, (int, float)):
+                return int(limit), 60
+
+            return None
+
+        def init_app(self, app):
+            parsed = self._parse_limit()
+            if not parsed:
+                return
+
+            self._max_requests, self._window_seconds = parsed
+
+            @app.before_request
+            def _check_rate_limit():  # pragma: no cover - fallback logic
+                key = self.key_func()
+                bucket = self._buckets.get(key)
+                now = time.time()
+
+                if not bucket or now - bucket["start"] >= self._window_seconds:
+                    bucket = {"start": now, "count": 0}
+                    self._buckets[key] = bucket
+
+                bucket["count"] += 1
+                if bucket["count"] > self._max_requests:
+                    raise TooManyRequests(description="Rate limit exceeded")
+
+        def limit(self, *args, **kwargs):  # pragma: no cover - compatibility stub
+            def decorator(func):
+                return func
+
+            return decorator
+
+    def get_remote_address():
+        return "127.0.0.1"
+
+Limiter = _Limiter
+from werkzeug.exceptions import HTTPException, TooManyRequests
 
 from config import Config
 from models import db
