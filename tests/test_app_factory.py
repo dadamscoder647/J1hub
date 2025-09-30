@@ -21,6 +21,6 @@ def test_health_endpoint_returns_ok(client, tmp_path):
 def test_blueprints_registered(app):
     """Application factory should register expected blueprints."""
     bps = set(app.blueprints.keys())
-    required = {"auth", "verify", "admin_verify", "listings"}
+    required = {"auth", "verify", "listings"}
     assert required.issubset(bps)
     # billing is optional; do not require it for tests

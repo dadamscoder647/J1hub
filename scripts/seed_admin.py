@@ -13,13 +13,19 @@ def main() -> None:
     with app.app_context():
         admin = User.query.filter_by(email=ADMIN_EMAIL).first()
         if admin is None:
-            admin = User(email=ADMIN_EMAIL, role="admin", is_verified=True)
+            admin = User(
+                email=ADMIN_EMAIL,
+                role="admin",
+                is_verified=True,
+                verification_status="approved",
+            )
             admin.set_password(ADMIN_PASSWORD)
             db.session.add(admin)
             action = "created"
         else:
             admin.role = "admin"
             admin.is_verified = True
+            admin.verification_status = "approved"
             admin.set_password(ADMIN_PASSWORD)
             action = "updated"
         db.session.commit()

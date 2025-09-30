@@ -139,7 +139,7 @@ from config import Config
 from models import db
 from routes.auth import auth_bp
 from routes.listings import listings_bp
-from routes.verify import admin_bp, verify_bp
+from routes.verify import verify_bp
 
 # Billing routes may be optional; import safely
 try:
@@ -192,7 +192,6 @@ def create_app(config_class: type[Config] = Config) -> Flask:
 
     # Blueprints
     app.register_blueprint(verify_bp, url_prefix="/verify")
-    app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(listings_bp, url_prefix="/listings")
     if billing_bp:  # only if billing module exists
         app.register_blueprint(billing_bp, url_prefix="/billing")

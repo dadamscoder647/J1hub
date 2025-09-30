@@ -40,12 +40,18 @@ def get_or_create_user(email: str, password: str, role: str) -> User:
 
     user = User.query.filter_by(email=email).first()
     if user is None:
-        user = User(email=email, role=role, is_verified=True)
+        user = User(
+            email=email,
+            role=role,
+            is_verified=True,
+            verification_status="approved",
+        )
         user.set_password(password)
         db.session.add(user)
     else:
         user.role = role
         user.is_verified = True
+        user.verification_status = "approved"
         user.set_password(password)
     return user
 

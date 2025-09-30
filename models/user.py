@@ -7,6 +7,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from . import db
 
 
+VERIFICATION_STATUSES = ("unverified", "pending", "approved", "rejected")
+
+
 class User(db.Model):
     """Represents a platform user."""
 
@@ -17,6 +20,12 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(32), nullable=False, default="worker")
     is_verified = db.Column(db.Boolean, nullable=False, default=False)
+    verification_status = db.Column(
+        db.Enum(*VERIFICATION_STATUSES, name="verification_status"),
+        nullable=False,
+        default="unverified",
+        server_default=db.text("'unverified'"),
+    )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     subscription = db.relationship(
         "EmployerSubscription",
