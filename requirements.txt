@@ -8,3 +8,6 @@ python-dotenv
 stripe
 boto3
 gunicorn
+
+Flask-Cors
+Flask-Limiter
