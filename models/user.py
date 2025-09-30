@@ -21,10 +21,14 @@ class User(db.Model):
     role = db.Column(db.String(32), nullable=False, default="worker")
     is_verified = db.Column(db.Boolean, nullable=False, default=False)
     verification_status = db.Column(
-        db.Enum(*VERIFICATION_STATUSES, name="verification_status"),
+        db.String(32),
         nullable=False,
         default="unverified",
-        server_default=db.text("'unverified'"),
+    )
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
     )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     subscription = db.relationship(
