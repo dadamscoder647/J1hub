@@ -27,7 +27,11 @@ def _get_current_user() -> User | None:
         return None
     if identity is None:
         return None
-    return User.query.get(identity)
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return None
+    return User.query.get(user_id)
 
 
 def _allowed_file(filename: str) -> bool:
