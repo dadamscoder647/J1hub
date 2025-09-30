@@ -40,3 +40,8 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         return jsonify({"status": "ok"})
 
     return app
+
+
+if __name__ == "__main__":
+    application = create_app()
+    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
