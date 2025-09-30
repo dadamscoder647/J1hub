@@ -4,12 +4,29 @@ from http import HTTPStatus
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token
-from werkzeug.security import check_password_hash
 
 from models import db
 from models.user import User
 
+ALLOWED_ROLES = {"worker", "employer", "admin"}
+
 auth_bp = Blueprint("auth", __name__)
+
+
+def _normalize_email(raw_email: str | None) -> str:
+    """Normalize an email string by stripping whitespace and lowering case."""
+
+    return (raw_email or "").strip().lower()
+
+
+def _extract_role(raw_role: str | None) -> str:
+    """Return a valid role string, defaulting to the model's default."""
+
+    default_role = getattr(User.role.default, "arg", "worker")
+    role = (raw_role or "").strip().lower() or default_role
+    if role not in ALLOWED_ROLES:
+        return ""
+    return role
 
 
 @auth_bp.route("/register", methods=["POST"])
@@ -17,16 +34,19 @@ def register() -> tuple:
     """Register a new user with an email, password, and optional role."""
 
     payload = request.get_json(silent=True) or {}
-    email = (payload.get("email") or "").strip().lower()
-    password = payload.get("password") or ""
-    default_role = getattr(User.role.default, "arg", "worker")
-    provided_role = payload.get("role")
-    role = (provided_role if provided_role not in (None, "") else default_role) or default_role
-    role = str(role).strip() or default_role
+    email = _normalize_email(payload.get("email"))
+    password = (payload.get("password") or "").strip()
+    role = _extract_role(payload.get("role")) or getattr(User.role.default, "arg", "worker")
 
     if not email or not password:
         return (
             jsonify({"error": "Email and password are required."}),
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    if payload.get("role") and role not in ALLOWED_ROLES:
+        return (
+            jsonify({"error": "Role must be one of: worker, employer, admin."}),
             HTTPStatus.BAD_REQUEST,
         )
 
@@ -58,8 +78,8 @@ def login() -> tuple:
     """Authenticate a user and return a JWT access token."""
 
     payload = request.get_json(silent=True) or {}
-    email = (payload.get("email") or "").strip().lower()
-    password = payload.get("password") or ""
+    email = _normalize_email(payload.get("email"))
+    password = (payload.get("password") or "").strip()
 
     if not email or not password:
         return (
@@ -68,7 +88,7 @@ def login() -> tuple:
         )
 
     user = User.query.filter_by(email=email).first()
-    if user is None or not check_password_hash(user.password_hash, password):
+    if user is None or not user.check_password(password):
         return (
             jsonify({"error": "Invalid email or password."}),
             HTTPStatus.UNAUTHORIZED,
