@@ -10,6 +10,7 @@ from config import Config
 from models import db
 from routes.auth import auth_bp
 from routes.listings import listings_bp
+from routes.billing import billing_bp
 from routes.verify import admin_bp, verify_bp
 
 migrate = Migrate()
@@ -33,6 +34,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     app.register_blueprint(verify_bp, url_prefix="/verify")
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(listings_bp, url_prefix="/listings")
+    app.register_blueprint(billing_bp, url_prefix="/billing")
     app.register_blueprint(auth_bp, url_prefix="/auth")
 
     @app.route("/health", methods=["GET"])
