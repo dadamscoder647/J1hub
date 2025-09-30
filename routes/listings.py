@@ -15,6 +15,7 @@ from sqlalchemy import and_, or_
 
 from models import db
 from models.application import Application
+from models.employer_subscription import EmployerSubscription
 from models.listing import CONTACT_METHODS, LISTING_CATEGORIES, Listing
 from models.user import User
 
@@ -177,6 +178,28 @@ def create_listing():
     if errors:
         return jsonify({"errors": errors}), 400
 
+    subscription = None
+    if user.role != "admin":
+        subscription = EmployerSubscription.query.filter_by(user_id=user.id).first()
+        now = datetime.utcnow()
+        has_active_subscription = bool(
+            subscription and subscription.has_active_subscription(now)
+        )
+        if not has_active_subscription:
+            if not subscription or (subscription.listing_credits or 0) <= 0:
+                return (
+                    jsonify(
+                        {
+                            "error": (
+                                "Listing credits or an active subscription is required "
+                                "to post listings."
+                            )
+                        }
+                    ),
+                    402,
+                )
+            subscription.listing_credits -= 1
+
     listing = Listing(
         category=data.get("category"),
         title=data.get("title"),
@@ -198,6 +221,8 @@ def create_listing():
         created_by=user.id,
     )
     db.session.add(listing)
+    if subscription is not None:
+        db.session.add(subscription)
     db.session.commit()
 
     return jsonify(listing.to_dict(include_contact=True)), 201
