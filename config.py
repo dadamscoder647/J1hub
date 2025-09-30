@@ -5,7 +5,12 @@ from pathlib import Path
 
 
 class Config:
-    """Base configuration for the Flask application."""
+    """Base configuration for the Flask application.
+
+    Environment variables:
+        MAX_UPLOAD_SIZE: Maximum upload size in bytes (default 10 MB).
+        ALLOWED_UPLOAD_TYPES: Comma-separated list of allowed MIME types for uploads.
+    """
 
     # Core
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
@@ -14,6 +19,10 @@ class Config:
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(Path("workspace") / "uploads"))
+    MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 10 * 1024 * 1024))
+    ALLOWED_UPLOAD_TYPES = os.getenv(
+        "ALLOWED_UPLOAD_TYPES", "image/jpeg,image/png,application/pdf"
+    ).split(",")
 
     # CORS
     _raw_origins = os.getenv("ORIGINS", "*")
