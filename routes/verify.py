@@ -10,7 +10,7 @@ from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 from models import db
 from models.user import User
-from models.visa_document import DOC_TYPES, VISA_STATUSES, VisaDocument
+from models.visa_document import VISA_DOCUMENT_STATUSES, VisaDocument
 from storage.local_storage import LocalStorage
 from utils.request_validation import parse_json_request
 
@@ -51,10 +51,6 @@ def upload_document():
     if not _allowed_file(file.filename):
         raise BadRequest("File type not allowed.")
 
-    doc_type = request.form.get("doc_type", "passport").lower()
-    if doc_type not in DOC_TYPES:
-        raise BadRequest("doc_type must be passport or j1_visa.")
-
     file.stream.seek(0, os.SEEK_END)
     size = file.stream.tell()
     file.stream.seek(0)
@@ -66,9 +62,9 @@ def upload_document():
 
     document = VisaDocument(
         user_id=user.id,
-        doc_type=doc_type,
-        file_url=saved_path,
-        status="pending",
+        filename=file.filename,
+        file_path=saved_path,
+        file_type=file.mimetype or "application/octet-stream",
     )
     db.session.add(document)
     db.session.commit()
@@ -127,7 +123,7 @@ def admin_pending():
 
 
 def _update_document_status(document_id: int, status: str) -> VisaDocument:
-    if status not in VISA_STATUSES:
+    if status not in VISA_DOCUMENT_STATUSES:
         raise BadRequest("Invalid status.")
 
     document = VisaDocument.query.get(document_id)
@@ -138,14 +134,18 @@ def _update_document_status(document_id: int, status: str) -> VisaDocument:
     if request.content_length and request.content_length > 0:
         payload = parse_json_request(request, allow_empty=True)
 
-    notes = payload.get("notes") if isinstance(payload, dict) else None
+    notes = None
+    if isinstance(payload, dict):
+        notes = payload.get("notes")
 
     document.status = status
-    document.notes = notes
+    document.review_note = notes
+    reviewer = _get_current_user()
+    document.reviewer_id = reviewer.id if reviewer else None
 
     if status == "approved":
         document.user.is_verified = True
-    elif status == "denied":
+    elif status == "rejected":
         document.user.is_verified = False
 
     db.session.commit()
@@ -167,6 +167,6 @@ def admin_approve(document_id: int):
 def admin_deny(document_id: int):
     _require_admin()
 
-    document = _update_document_status(document_id, "denied")
+    document = _update_document_status(document_id, "rejected")
 
     return jsonify({"document": document.to_dict()}), 200
