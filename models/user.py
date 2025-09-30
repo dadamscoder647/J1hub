@@ -18,6 +18,12 @@ class User(db.Model):
     role = db.Column(db.String(32), nullable=False, default="worker")
     is_verified = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    subscription = db.relationship(
+        "EmployerSubscription",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def set_password(self, password: str) -> None:
         """Hash and store the password."""
