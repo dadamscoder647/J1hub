@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, asdict
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -120,11 +121,4 @@ def bootstrap() -> CreatedRecords:
 
 if __name__ == "__main__":
     records = bootstrap()
-    print(
-        {
-            "admin_id": records.admin_id,
-            "employer_id": records.employer_id,
-            "worker_id": records.worker_id,
-            "listing_id": records.listing_id,
-        }
-    )
+    print(json.dumps(asdict(records)))
