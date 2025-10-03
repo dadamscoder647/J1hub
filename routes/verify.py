@@ -75,11 +75,23 @@ def _allowed_extensions() -> set[str]:
         values: Iterable[str] = configured.split(",")
     else:
         values = configured
-    normalized = {
-        item.strip().lower().lstrip(".")
-        for item in values
-        if isinstance(item, str) and item.strip()
-    }
+
+    normalized: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, str):
+            continue
+
+        item = raw.strip().lower()
+        if not item:
+            continue
+
+        if "/" in item and not item.startswith("."):
+            item = item.rsplit("/", 1)[-1]
+
+        item = item.lstrip(".")
+        if item:
+            normalized.add(item)
+
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
     if "jpeg" in normalized:
