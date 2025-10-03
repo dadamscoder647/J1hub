@@ -9,7 +9,8 @@ class Config:
 
     Environment variables:
         MAX_UPLOAD_SIZE: Maximum upload size in bytes (default 10 MB).
-        ALLOWED_UPLOAD_TYPES: Comma-separated list of allowed MIME types for uploads.
+        ALLOWED_UPLOAD_TYPES: Comma-separated list of allowed MIME types or file
+            extensions for uploads.
     """
 
     # Core
