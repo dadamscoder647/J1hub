@@ -22,7 +22,7 @@ from utils.request_validation import parse_json_request
 verify_bp = Blueprint("verify", __name__)
 
 MAX_UPLOAD_SIZE_DEFAULT = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS_DEFAULT = {"jpeg", "jpg", "png", "pdf"}
+ALLOWED_UPLOAD_TYPES_DEFAULT = {"image/jpeg", "image/png", "application/pdf"}
 
 
 def _get_current_user() -> User | None:
@@ -67,25 +67,21 @@ def _parse_bool(value: object) -> bool | None:
     return None
 
 
-def _allowed_extensions() -> set[str]:
+def _allowed_upload_types() -> set[str]:
     configured = current_app.config.get("ALLOWED_UPLOAD_TYPES")
     if not configured:
-        return set(ALLOWED_EXTENSIONS_DEFAULT)
+        return set(ALLOWED_UPLOAD_TYPES_DEFAULT)
     if isinstance(configured, str):
         values: Iterable[str] = configured.split(",")
     else:
         values = configured
     normalized = {
-        item.strip().lower().lstrip(".")
+        item.strip().lower()
         for item in values
         if isinstance(item, str) and item.strip()
     }
     if not normalized:
-        return set(ALLOWED_EXTENSIONS_DEFAULT)
-    if "jpeg" in normalized:
-        normalized.add("jpg")
-    if "jpg" in normalized:
-        normalized.add("jpeg")
+        return set(ALLOWED_UPLOAD_TYPES_DEFAULT)
     return normalized
 
 
@@ -93,9 +89,10 @@ def _validate_document(file: FileStorage) -> None:
     if file.filename is None or file.filename.strip() == "":
         raise BadRequest("A document file is required.")
 
-    extension = file.filename.rsplit(".", 1)[-1].lower()
-    if extension not in _allowed_extensions():
-        allowed = ", ".join(sorted(_allowed_extensions()))
+    mimetype = (file.mimetype or "").strip().lower()
+    allowed_upload_types = _allowed_upload_types()
+    if mimetype not in allowed_upload_types:
+        allowed = ", ".join(sorted(allowed_upload_types))
         raise BadRequest(f"File type not allowed. Allowed types: {allowed}.")
 
     max_size = int(current_app.config.get("MAX_UPLOAD_SIZE", MAX_UPLOAD_SIZE_DEFAULT))
