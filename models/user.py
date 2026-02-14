@@ -30,11 +30,6 @@ class User(db.Model):
         db.Boolean,
         nullable=False,
         default=True,
-    )
-    is_active = db.Column(
-        db.Boolean,
-        nullable=False,
-        default=True,
         server_default=db.text("true"),
     )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)

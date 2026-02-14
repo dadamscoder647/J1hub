@@ -37,3 +37,21 @@ def test_user_verification_helpers(app):
         db.session.refresh(user)
 
         assert user.verification_status == "unverified"
+
+
+def test_user_table_columns_are_unique_and_expected():
+    """Ensure the users table metadata defines each expected column exactly once."""
+
+    column_names = [column.name for column in User.__table__.columns]
+
+    assert len(column_names) == len(set(column_names))
+    assert column_names == [
+        "id",
+        "email",
+        "password_hash",
+        "role",
+        "is_verified",
+        "verification_status",
+        "is_active",
+        "created_at",
+    ]
