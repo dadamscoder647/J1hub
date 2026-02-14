@@ -87,6 +87,51 @@ def test_upload_and_status(app: Flask, client):
     assert refreshed_user.verification_status == "pending"
 
 
+
+def test_upload_accepts_allowed_mimetype_with_unexpected_extension(app: Flask, client):
+    """Upload succeeds when MIME type is allowed even if extension is unexpected."""
+
+    _, token = _register_and_login(
+        app, client, "mime-flow-allowed@example.com", "secret123"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"PDF data"), "document.unknown", "application/pdf"),
+            "waiver": "true",
+        },
+        headers=headers,
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+
+
+def test_upload_rejects_disallowed_mimetype_with_pdf_extension(app: Flask, client):
+    """Upload fails when MIME type is disallowed even if filename uses an allowed extension."""
+
+    _, token = _register_and_login(
+        app, client, "mime-flow-rejected@example.com", "secret123"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"not really a pdf"), "document.pdf", "text/plain"),
+            "waiver": "true",
+        },
+        headers=headers,
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+
+
 def test_admin_approve(app: Flask, client):
     """Admins can approve documents via the review endpoint."""
 

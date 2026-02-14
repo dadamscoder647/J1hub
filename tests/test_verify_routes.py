@@ -60,6 +60,51 @@ def test_upload_document_creates_pending_record(app, client):
     assert stored_file.exists()
 
 
+
+def test_upload_document_accepts_allowed_mimetype_with_nonstandard_extension(app, client):
+    """Upload succeeds when MIME type is allowed, regardless of filename extension."""
+
+    with app.app_context():
+        user = _create_user("mime-allowed@example.com")
+        user_id = user.id
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"PDF data"), "passport.bin", "application/pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["status"] == "pending"
+
+
+def test_upload_document_rejects_disallowed_mimetype_even_with_allowed_extension(app, client):
+    """Upload fails when MIME type is not allowed, even with an allowed extension."""
+
+    with app.app_context():
+        user = _create_user("mime-rejected@example.com")
+        user_id = user.id
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"PDF data"), "passport.pdf", "text/plain"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+
+
 def test_status_endpoint_returns_latest_document(app, client):
     """Status endpoint includes user status and latest document metadata."""
 
