@@ -140,6 +140,7 @@ from models import db
 from routes.auth import auth_bp
 from routes.listings import listings_bp
 from routes.verify import verify_bp
+from routes.notifications import notifications_bp
 
 # Billing routes may be optional; import safely
 try:
@@ -196,6 +197,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     if billing_bp:  # only if billing module exists
         app.register_blueprint(billing_bp, url_prefix="/billing")
     app.register_blueprint(auth_bp, url_prefix="/auth")
+    app.register_blueprint(notifications_bp, url_prefix="/notifications")
 
     # Health
     @app.route("/health", methods=["GET"])

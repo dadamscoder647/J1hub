@@ -11,6 +11,7 @@ import stripe
 from models import db
 from models.employer_subscription import EmployerSubscription
 from models.user import User
+from services.notification_service import create_notification
 
 billing_bp = Blueprint("billing", __name__)
 
@@ -144,6 +145,13 @@ def _handle_listing_purchase(metadata: dict) -> None:
 
     subscription = _get_or_create_subscription(user_id_int)
     subscription.listing_credits = (subscription.listing_credits or 0) + quantity
+    create_notification(
+        user_id=user_id_int,
+        event_type="billing_credit_change",
+        title="Listing credits added",
+        message=f"{quantity} listing credit(s) were added to your account.",
+        metadata={"quantity": quantity, "listing_credits": subscription.listing_credits},
+    )
 
 
 def _set_subscription_active(user_id: int, current_period_end: int | None) -> None:
@@ -153,6 +161,13 @@ def _set_subscription_active(user_id: int, current_period_end: int | None) -> No
     new_expiration = datetime.fromtimestamp(current_period_end, UTC).replace(tzinfo=None)
     if not subscription.active_until or subscription.active_until < new_expiration:
         subscription.active_until = new_expiration
+        create_notification(
+            user_id=user_id,
+            event_type="billing_credit_change",
+            title="Subscription active",
+            message="Your employer subscription was activated or renewed.",
+            metadata={"active_until": subscription.active_until.isoformat()},
+        )
 
 
 def _handle_subscription_event(subscription_id: str | None) -> None:

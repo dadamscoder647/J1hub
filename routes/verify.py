@@ -16,6 +16,7 @@ from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 from models import db
 from models.user import User
 from models.visa_document import VisaDocument
+from services.notification_service import create_notification
 from storage.local_storage import LocalStorage
 from utils.request_validation import parse_json_request
 
@@ -75,11 +76,14 @@ def _allowed_extensions() -> set[str]:
         values: Iterable[str] = configured.split(",")
     else:
         values = configured
-    normalized = {
-        item.strip().lower().lstrip(".")
-        for item in values
-        if isinstance(item, str) and item.strip()
-    }
+    normalized = set()
+    for item in values:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        token = item.strip().lower()
+        if "/" in token:
+            token = token.split("/")[-1]
+        normalized.add(token.lstrip("."))
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
     if "jpeg" in normalized:
@@ -251,6 +255,13 @@ def approve_document(document_id: int):
     document.reviewer_id = reviewer.id
     _update_user_status(document.user, "approved")
 
+    create_notification(
+        user_id=document.user_id,
+        event_type="verification_result",
+        title="Verification approved",
+        message="Your verification documents were approved.",
+        metadata={"document_id": document.id, "status": "approved"},
+    )
     db.session.commit()
 
     return jsonify(
@@ -282,6 +293,13 @@ def reject_document(document_id: int):
     document.reviewer_id = reviewer.id
     _update_user_status(document.user, "rejected")
 
+    create_notification(
+        user_id=document.user_id,
+        event_type="verification_result",
+        title="Verification rejected",
+        message="Your verification documents were rejected.",
+        metadata={"document_id": document.id, "status": "rejected", "review_note": review_note},
+    )
     db.session.commit()
 
     return jsonify(
