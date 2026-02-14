@@ -75,11 +75,18 @@ def _allowed_extensions() -> set[str]:
         values: Iterable[str] = configured.split(",")
     else:
         values = configured
-    normalized = {
-        item.strip().lower().lstrip(".")
-        for item in values
-        if isinstance(item, str) and item.strip()
+    mime_to_ext = {
+        "image/jpeg": "jpeg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "application/pdf": "pdf",
     }
+    normalized = set()
+    for item in values:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        token = item.strip().lower()
+        normalized.add(mime_to_ext.get(token, token.lstrip(".")))
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
     if "jpeg" in normalized:

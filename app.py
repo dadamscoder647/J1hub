@@ -191,13 +191,22 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         os.makedirs(upload_dir, exist_ok=True)
 
     # Blueprints
-    app.register_blueprint(verify_bp, url_prefix="/verify")
-    app.register_blueprint(listings_bp, url_prefix="/listings")
+    app.register_blueprint(verify_bp, url_prefix="/api/v1/verify")
+    app.register_blueprint(listings_bp, url_prefix="/api/v1/listings")
     if billing_bp:  # only if billing module exists
-        app.register_blueprint(billing_bp, url_prefix="/billing")
-    app.register_blueprint(auth_bp, url_prefix="/auth")
+        app.register_blueprint(billing_bp, url_prefix="/api/v1/billing")
+    app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
+
+    # Backward-compatible legacy routes can be disabled after migration.
+    if app.config.get("API_ENABLE_LEGACY_ROUTES", True):
+        app.register_blueprint(verify_bp, url_prefix="/verify", name="verify_legacy")
+        app.register_blueprint(listings_bp, url_prefix="/listings", name="listings_legacy")
+        if billing_bp:
+            app.register_blueprint(billing_bp, url_prefix="/billing", name="billing_legacy")
+        app.register_blueprint(auth_bp, url_prefix="/auth", name="auth_legacy")
 
     # Health
+    @app.route("/api/v1/health", methods=["GET"])
     @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify({"status": "ok"})
