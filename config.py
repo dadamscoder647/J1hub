@@ -15,6 +15,9 @@ class Config:
     # Core
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
+    TESTING = os.getenv("TESTING", "false").lower() == "true"
+    DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+    ENV = os.getenv("FLASK_ENV") or os.getenv("ENV") or "production"
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -44,3 +47,35 @@ class Config:
     PRICE_MONTHLY = os.getenv("PRICE_MONTHLY")
     BILLING_SUCCESS_URL = os.getenv("BILLING_SUCCESS_URL")
     BILLING_CANCEL_URL = os.getenv("BILLING_CANCEL_URL")
+
+    _INSECURE_SECRET_VALUES = {"", "change-me", "changeme", "default", "placeholder"}
+
+    @classmethod
+    def should_enforce_secret_validation(cls) -> bool:
+        """Return whether strict secret validation should be enforced."""
+        return not bool(getattr(cls, "TESTING", False)) and not (
+            bool(getattr(cls, "DEBUG", False))
+            or str(getattr(cls, "ENV", "")).lower() == "development"
+        )
+
+    @classmethod
+    def validate_security_settings(cls) -> None:
+        """Validate runtime security settings for non-safe environments."""
+        if not cls.should_enforce_secret_validation():
+            return
+
+        secret_key = str(getattr(cls, "SECRET_KEY", "") or "").strip()
+        jwt_secret_key = str(getattr(cls, "JWT_SECRET_KEY", "") or "").strip()
+
+        missing_or_insecure = []
+        if secret_key.lower() in cls._INSECURE_SECRET_VALUES:
+            missing_or_insecure.append("SECRET_KEY")
+        if jwt_secret_key.lower() in cls._INSECURE_SECRET_VALUES:
+            missing_or_insecure.append("JWT_SECRET_KEY")
+
+        if missing_or_insecure:
+            keys = ", ".join(missing_or_insecure)
+            raise RuntimeError(
+                f"Refusing to start with insecure default secrets ({keys}). "
+                "Set strong SECRET_KEY and JWT_SECRET_KEY values in the environment."
+            )
