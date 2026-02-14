@@ -157,6 +157,9 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    if hasattr(config_class, "validate_security_settings"):
+        config_class.validate_security_settings()
+
     # Core subsystems
     db.init_app(app)
     migrate.init_app(app, db)

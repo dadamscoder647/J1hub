@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from flask import Flask
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -75,3 +76,38 @@ def test_json_error_shape_for_invalid_request(tmp_path):
     assert payload["error"] == "Bad Request"
     assert "Request content type" in payload["detail"]
     assert payload["request_id"]
+
+
+def test_startup_rejects_default_secrets_in_non_testing_context(tmp_path):
+    upload_dir = tmp_path / "uploads"
+
+    class ProductionConfig(Config):
+        TESTING = False
+        DEBUG = False
+        ENV = "production"
+        SECRET_KEY = "change-me"
+        JWT_SECRET_KEY = "change-me"
+        SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+        SQLALCHEMY_TRACK_MODIFICATIONS = False
+        UPLOAD_DIR = str(upload_dir)
+
+    with pytest.raises(RuntimeError, match="Refusing to start"):
+        create_app(ProductionConfig)
+
+
+def test_startup_allows_default_secrets_when_testing_enabled(tmp_path):
+    upload_dir = tmp_path / "uploads"
+
+    class TestingConfig(Config):
+        TESTING = True
+        DEBUG = False
+        ENV = "production"
+        SECRET_KEY = "change-me"
+        JWT_SECRET_KEY = "change-me"
+        SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+        SQLALCHEMY_TRACK_MODIFICATIONS = False
+        UPLOAD_DIR = str(upload_dir)
+
+    app = create_app(TestingConfig)
+
+    assert app.testing is True
