@@ -12,7 +12,8 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 from sqlalchemy import and_, or_
-from werkzeug.exceptions import BadRequest, Forbidden
+from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import BadRequest, Conflict, Forbidden
 
 from models import db
 from models.application import Application
@@ -316,8 +317,19 @@ def apply_to_listing(listing_id: int):
     if not message:
         raise BadRequest("message is required")
 
+    existing_application = Application.query.filter_by(
+        user_id=user.id,
+        listing_id=listing.id,
+    ).first()
+    if existing_application:
+        raise Conflict("You have already applied to this listing.")
+
     application = Application(user_id=user.id, listing_id=listing.id, message=message)
     db.session.add(application)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        raise Conflict("You have already applied to this listing.")
 
     return jsonify(application.to_dict()), 201
