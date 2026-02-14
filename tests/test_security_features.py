@@ -75,3 +75,17 @@ def test_json_error_shape_for_invalid_request(tmp_path):
     assert payload["error"] == "Bad Request"
     assert "Request content type" in payload["detail"]
     assert payload["request_id"]
+
+
+def test_rate_limit_key_prefix_defaults_to_deterministic_value(tmp_path):
+    app = _build_app(tmp_path)
+
+    assert app.config["RATELIMIT_KEY_PREFIX"] == "app:testing"
+
+
+def test_rate_limit_key_prefix_can_be_randomized_for_tests(tmp_path):
+    app = _build_app(tmp_path, RATELIMIT_RANDOM_KEY_PREFIX_FOR_TESTS=True)
+
+    prefix = app.config["RATELIMIT_KEY_PREFIX"]
+    assert prefix.startswith("app:testing:")
+    assert len(prefix.split(":")) == 3

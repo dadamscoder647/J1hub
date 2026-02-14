@@ -172,7 +172,18 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     # Rate limiting
     storage_uri = app.config.get("RATELIMIT_STORAGE_URI", "memory://")
     headers_enabled = app.config.get("RATELIMIT_HEADERS_ENABLED", True)
-    key_prefix = app.config.get("RATELIMIT_KEY_PREFIX") or str(uuid.uuid4())
+    key_prefix = app.config.get("RATELIMIT_KEY_PREFIX")
+    if not key_prefix:
+        env_name = (
+            app.config.get("ENV")
+            or os.getenv("FLASK_ENV")
+            or os.getenv("APP_ENV")
+            or ("testing" if app.testing else "production")
+        )
+        key_prefix = f"{app.import_name}:{env_name}"
+
+    if app.config.get("RATELIMIT_RANDOM_KEY_PREFIX_FOR_TESTS"):
+        key_prefix = f"{key_prefix}:{uuid.uuid4()}"
 
     global limiter
     limiter = Limiter(

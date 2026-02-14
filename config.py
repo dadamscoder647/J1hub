@@ -36,6 +36,10 @@ class Config:
     RATELIMIT_HEADERS_ENABLED = True
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_KEY_PREFIX = os.getenv("RATELIMIT_KEY_PREFIX", "")
+    RATELIMIT_RANDOM_KEY_PREFIX_FOR_TESTS = (
+        os.getenv("RATELIMIT_RANDOM_KEY_PREFIX_FOR_TESTS", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
 
     # Stripe / billing (optional)
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
