@@ -21,6 +21,11 @@ from utils.request_validation import parse_json_request
 
 verify_bp = Blueprint("verify", __name__)
 
+DEPRECATION_WARNING = (
+    '299 - "Legacy /verify admin endpoints are deprecated; '
+    'use /admin/verify/* instead."'
+)
+
 MAX_UPLOAD_SIZE_DEFAULT = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS_DEFAULT = {"jpeg", "jpg", "png", "pdf"}
 
@@ -75,11 +80,16 @@ def _allowed_extensions() -> set[str]:
         values: Iterable[str] = configured.split(",")
     else:
         values = configured
-    normalized = {
-        item.strip().lower().lstrip(".")
-        for item in values
-        if isinstance(item, str) and item.strip()
-    }
+    normalized: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip().lower()
+        if not cleaned:
+            continue
+        if "/" in cleaned:
+            cleaned = cleaned.rsplit("/", 1)[-1]
+        normalized.add(cleaned.lstrip("."))
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
     if "jpeg" in normalized:
@@ -224,7 +234,12 @@ def list_pending_documents() -> ResponseReturnValue:
         .all()
     )
 
-    return jsonify([_serialize_pending_document(document) for document in pending_documents])
+    response = jsonify([
+        _serialize_pending_document(document) for document in pending_documents
+    ])
+    if request.path == "/verify/pending":
+        response.headers["Warning"] = DEPRECATION_WARNING
+    return response
 
 
 @verify_bp.record_once
@@ -235,6 +250,24 @@ def _register_admin_routes(state) -> None:  # pragma: no cover - registration ho
         view_func=jwt_required()(list_pending_documents),
         methods=["GET"],
         endpoint="verify.list_pending_documents",
+    )
+    app.add_url_rule(
+        "/verify/pending",
+        view_func=jwt_required()(list_pending_documents),
+        methods=["GET"],
+        endpoint="verify.list_pending_documents_legacy",
+    )
+    app.add_url_rule(
+        "/admin/verify/<int:document_id>/approve",
+        view_func=jwt_required()(approve_document),
+        methods=["POST"],
+        endpoint="verify.approve_document_admin",
+    )
+    app.add_url_rule(
+        "/admin/verify/<int:document_id>/reject",
+        view_func=jwt_required()(reject_document),
+        methods=["POST"],
+        endpoint="verify.reject_document_admin",
     )
 
 
@@ -253,13 +286,16 @@ def approve_document(document_id: int):
 
     db.session.commit()
 
-    return jsonify(
+    response = jsonify(
         {
             "id": document.id,
             "status": document.status,
             "verification_status": document.user.verification_status,
         }
     )
+    if request.path.startswith("/verify/"):
+        response.headers["Warning"] = DEPRECATION_WARNING
+    return response
 
 
 @verify_bp.route("/<int:document_id>/reject", methods=["POST"])
@@ -284,7 +320,7 @@ def reject_document(document_id: int):
 
     db.session.commit()
 
-    return jsonify(
+    response = jsonify(
         {
             "id": document.id,
             "status": document.status,
@@ -292,3 +328,6 @@ def reject_document(document_id: int):
             "review_note": document.review_note,
         }
     )
+    if request.path.startswith("/verify/"):
+        response.headers["Warning"] = DEPRECATION_WARNING
+    return response

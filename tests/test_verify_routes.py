@@ -215,7 +215,7 @@ def test_admin_approve_updates_user_status(app, client):
         document_id = document.id
 
     response = client.post(
-        f"/verify/{document_id}/approve",
+        f"/admin/verify/{document_id}/approve",
         headers=_auth_headers(app, admin_id),
     )
     assert response.status_code == 200
@@ -255,7 +255,7 @@ def test_admin_reject_updates_note_and_status(app, client):
         document_id = document.id
 
     response = client.post(
-        f"/verify/{document_id}/reject",
+        f"/admin/verify/{document_id}/reject",
         json={"review_note": "Missing signature"},
         headers=_auth_headers(app, admin_id),
     )
@@ -273,6 +273,40 @@ def test_admin_reject_updates_note_and_status(app, client):
     assert refreshed_user.verification_status == "rejected"
     assert refreshed_user.is_verified is False
 
+
+
+def test_legacy_admin_routes_include_deprecation_warning(app, client):
+    """Legacy /verify admin aliases remain available but emit warning header."""
+
+    with app.app_context():
+        admin = _create_user("legacy-admin@example.com", role="admin")
+        worker = _create_user("legacy-worker@example.com")
+        document = VisaDocument(
+            user_id=worker.id,
+            filename="legacy.pdf",
+            file_path="legacy.pdf",
+            file_type="application/pdf",
+            status="pending",
+            waiver_acknowledged=True,
+        )
+        db.session.add(document)
+        db.session.commit()
+        admin_id = admin.id
+        document_id = document.id
+
+    response_pending = client.get(
+        "/verify/pending",
+        headers=_auth_headers(app, admin_id),
+    )
+    response_approve = client.post(
+        f"/verify/{document_id}/approve",
+        headers=_auth_headers(app, admin_id),
+    )
+
+    assert response_pending.status_code == 200
+    assert "deprecated" in response_pending.headers.get("Warning", "").lower()
+    assert response_approve.status_code == 200
+    assert "deprecated" in response_approve.headers.get("Warning", "").lower()
 
 def test_non_admin_cannot_access_admin_routes(app, client):
     """Workers cannot access admin-only verification routes."""
@@ -301,11 +335,11 @@ def test_non_admin_cannot_access_admin_routes(app, client):
         headers=_auth_headers(app, worker_id),
     )
     response_approve = client.post(
-        f"/verify/{document_id}/approve",
+        f"/admin/verify/{document_id}/approve",
         headers=_auth_headers(app, worker_id),
     )
     response_reject = client.post(
-        f"/verify/{document_id}/reject",
+        f"/admin/verify/{document_id}/reject",
         headers=_auth_headers(app, worker_id),
     )
 
