@@ -84,3 +84,17 @@ curl -X POST "$BASE_URL/listings/1/apply" \
   -H "Content-Type: application/json" \
   -d '{"message": "I have three seasons of experience."}'
 ```
+
+## Billing Status (Employer/Admin)
+
+```bash
+curl -X GET "$BASE_URL/billing/status" \
+  -H "Authorization: Bearer $EMPLOYER_TOKEN"
+```
+
+## Billing History (Employer/Admin)
+
+```bash
+curl -X GET "$BASE_URL/billing/history?limit=25" \
+  -H "Authorization: Bearer $EMPLOYER_TOKEN"
+```

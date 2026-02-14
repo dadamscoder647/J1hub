@@ -9,6 +9,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 import stripe
 
 from models import db
+from models.billing_event import BillingEvent
 from models.employer_subscription import EmployerSubscription
 from models.user import User
 
@@ -25,6 +26,15 @@ def _get_employer(user_id: int | str | None) -> User | None:
     except (TypeError, ValueError):
         return None
     return User.query.get(user_id)
+
+
+def _require_billing_user() -> User | None:
+    """Return the current user if billing access is allowed."""
+
+    user = _get_employer(get_jwt_identity())
+    if user is None or user.role not in {"employer", "admin"}:
+        return None
+    return user
 
 
 def _get_or_create_subscription(user_id: int) -> EmployerSubscription:
@@ -45,6 +55,86 @@ def _init_stripe() -> str | None:
     return api_key
 
 
+def _log_billing_event(
+    *,
+    user_id: int,
+    event_type: str,
+    provider_event_id: str | None,
+    details: dict | None = None,
+) -> None:
+    """Insert a lightweight billing history event for user visibility."""
+
+    if provider_event_id:
+        existing = BillingEvent.query.filter_by(provider_event_id=provider_event_id).first()
+        if existing:
+            return
+    db.session.add(
+        BillingEvent(
+            user_id=user_id,
+            provider="stripe",
+            event_type=event_type,
+            provider_event_id=provider_event_id,
+            details=details or {},
+        )
+    )
+
+
+@billing_bp.route("/status", methods=["GET"])
+@jwt_required()
+def billing_status():
+    """Get listing credits and subscription status for current employer/admin."""
+
+    user = _require_billing_user()
+    if user is None:
+        return (
+            jsonify({"error": "Only employers or admins can access billing status."}),
+            403,
+        )
+
+    subscription = EmployerSubscription.query.filter_by(user_id=user.id).first()
+    now = datetime.utcnow()
+    has_subscription = bool(subscription and subscription.has_active_subscription(now))
+
+    return jsonify(
+        {
+            "listing_credits": subscription.listing_credits if subscription else 0,
+            "has_active_subscription": has_subscription,
+            "active_until": (
+                subscription.active_until.isoformat()
+                if subscription and subscription.active_until
+                else None
+            ),
+        }
+    )
+
+
+@billing_bp.route("/history", methods=["GET"])
+@jwt_required()
+def billing_history():
+    """Return webhook-backed billing history for the current employer/admin account."""
+
+    user = _require_billing_user()
+    if user is None:
+        return (
+            jsonify({"error": "Only employers or admins can access billing history."}),
+            403,
+        )
+
+    limit = request.args.get("limit", 25)
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer between 1 and 100."}), 400
+
+    events = (
+        BillingEvent.query.filter_by(user_id=user.id)
+        .order_by(BillingEvent.created_at.desc(), BillingEvent.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify({"events": [event.to_dict() for event in events], "count": len(events)})
+
+
 @billing_bp.route("/create-checkout-session", methods=["POST"])
 @jwt_required()
 def create_checkout_session():
@@ -57,9 +147,8 @@ def create_checkout_session():
             500,
         )
 
-    user_id = get_jwt_identity()
-    user = _get_employer(user_id)
-    if user is None or user.role not in {"employer", "admin"}:
+    user = _require_billing_user()
+    if user is None:
         return (
             jsonify({"error": "Only employers or admins can start billing sessions."}),
             403,
@@ -127,7 +216,7 @@ def create_checkout_session():
     return jsonify({"sessionId": session.id, "url": session.url})
 
 
-def _handle_listing_purchase(metadata: dict) -> None:
+def _handle_listing_purchase(metadata: dict, event_id: str | None) -> None:
     user_id = metadata.get("user_id")
     if not user_id:
         return
@@ -144,18 +233,30 @@ def _handle_listing_purchase(metadata: dict) -> None:
 
     subscription = _get_or_create_subscription(user_id_int)
     subscription.listing_credits = (subscription.listing_credits or 0) + quantity
+    _log_billing_event(
+        user_id=user_id_int,
+        event_type="listing_credits_added",
+        provider_event_id=event_id,
+        details={"quantity": quantity},
+    )
 
 
-def _set_subscription_active(user_id: int, current_period_end: int | None) -> None:
+def _set_subscription_active(user_id: int, current_period_end: int | None, event_id: str | None) -> None:
     if current_period_end is None:
         return
     subscription = _get_or_create_subscription(user_id)
     new_expiration = datetime.fromtimestamp(current_period_end, UTC).replace(tzinfo=None)
     if not subscription.active_until or subscription.active_until < new_expiration:
         subscription.active_until = new_expiration
+    _log_billing_event(
+        user_id=user_id,
+        event_type="subscription_renewed",
+        provider_event_id=event_id,
+        details={"active_until": new_expiration.isoformat()},
+    )
 
 
-def _handle_subscription_event(subscription_id: str | None) -> None:
+def _handle_subscription_event(subscription_id: str | None, event_id: str | None) -> None:
     if not subscription_id:
         return
     try:
@@ -171,7 +272,7 @@ def _handle_subscription_event(subscription_id: str | None) -> None:
     except (TypeError, ValueError):
         return
     current_period_end = subscription_obj.get("current_period_end")
-    _set_subscription_active(user_id_int, current_period_end)
+    _set_subscription_active(user_id_int, current_period_end, event_id)
 
 
 @billing_bp.route("/webhook", methods=["POST"])
@@ -195,19 +296,20 @@ def billing_webhook():
         return jsonify({"error": "Invalid webhook signature."}), 400
 
     event_type = event.get("type")
+    event_id = event.get("id")
     data_object = event.get("data", {}).get("object", {})
     metadata = data_object.get("metadata", {})
 
     if event_type == "checkout.session.completed":
         billing_type = metadata.get("billing_type")
         if billing_type == "listing":
-            _handle_listing_purchase(metadata)
+            _handle_listing_purchase(metadata, event_id)
         elif billing_type == "subscription":
             subscription_id = data_object.get("subscription")
-            _handle_subscription_event(subscription_id)
+            _handle_subscription_event(subscription_id, event_id)
     elif event_type == "invoice.paid":
         subscription_id = data_object.get("subscription")
-        _handle_subscription_event(subscription_id)
+        _handle_subscription_event(subscription_id, event_id)
 
     db.session.commit()
     return jsonify({"status": "success"})
