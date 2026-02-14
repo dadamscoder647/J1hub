@@ -20,16 +20,20 @@ class User(db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(32), nullable=False, default="worker")
+    skills = db.Column(db.Text, nullable=True)
+    nationality = db.Column(db.String(120), nullable=True)
+    visa_type = db.Column(db.String(120), nullable=True)
+    visa_expiry = db.Column(db.DateTime, nullable=True)
+    availability = db.Column(db.String(120), nullable=True)
+    company_name = db.Column(db.String(255), nullable=True)
+    company_website = db.Column(db.String(255), nullable=True)
+    company_size = db.Column(db.String(64), nullable=True)
+    company_industry = db.Column(db.String(120), nullable=True)
     is_verified = db.Column(db.Boolean, nullable=False, default=False)
     verification_status = db.Column(
         db.String(32),
         nullable=False,
         default="unverified",
-    )
-    is_active = db.Column(
-        db.Boolean,
-        nullable=False,
-        default=True,
     )
     is_active = db.Column(
         db.Boolean,
