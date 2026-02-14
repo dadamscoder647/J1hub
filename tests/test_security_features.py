@@ -5,14 +5,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from flask import Flask
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app import create_app
-from config import Config
+from app import create_app  # noqa: E402
+from config import Config  # noqa: E402
 
 
 class _SecurityBaseConfig(Config):
@@ -37,12 +38,12 @@ def test_cors_allows_configured_origin(tmp_path):
     app = _build_app(tmp_path, CORS_ORIGINS=["https://client.example"])
     client = app.test_client()
 
-    response = client.get(
-        "/health", headers={"Origin": "https://client.example"}
-    )
+    response = client.get("/health", headers={"Origin": "https://client.example"})
 
     assert response.status_code == 200
-    assert response.headers.get("Access-Control-Allow-Origin") == "https://client.example"
+    assert (
+        response.headers.get("Access-Control-Allow-Origin") == "https://client.example"
+    )
     assert response.headers.get("X-Request-ID")
 
 
@@ -75,3 +76,27 @@ def test_json_error_shape_for_invalid_request(tmp_path):
     assert payload["error"] == "Bad Request"
     assert "Request content type" in payload["detail"]
     assert payload["request_id"]
+
+
+def test_production_requires_secret_keys(tmp_path):
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        _build_app(
+            tmp_path,
+            APP_ENV="production",
+            TESTING=False,
+            SECRET_KEY="change-me",
+            JWT_SECRET_KEY="change-me",
+        )
+
+
+def test_production_requires_stripe_webhook_when_stripe_enabled(tmp_path):
+    with pytest.raises(RuntimeError, match="STRIPE_WEBHOOK_SECRET"):
+        _build_app(
+            tmp_path,
+            APP_ENV="production",
+            TESTING=False,
+            SECRET_KEY="prod-secret",
+            JWT_SECRET_KEY="prod-jwt-secret",
+            STRIPE_SECRET_KEY="sk_live_value",
+            STRIPE_WEBHOOK_SECRET=None,
+        )

@@ -1,24 +1,85 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - run: pip install -r requirements-dev.txt
-      - name: Migrate DB and run tests
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run lint + type checks
+        run: |
+          ruff check .
+          mypy --ignore-missing-imports --follow-imports skip app.py config.py
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run unit tests
         env:
-          SECRET_KEY: ci
-          JWT_SECRET_KEY: ci
+          SECRET_KEY: ci-secret
+          JWT_SECRET_KEY: ci-jwt-secret
           DATABASE_URL: sqlite:///test.db
           UPLOAD_DIR: workspace/uploads
           FLASK_APP: app:create_app
         run: |
           mkdir -p workspace/uploads
-          flask db upgrade || (flask db init && flask db migrate -m "ci init" && flask db upgrade)
-          pytest -q
+          pytest -q tests/test_security_features.py tests/test_app_factory.py
+
+  migration-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install psycopg2-binary
+      - name: Verify migrations are in sync
+        env:
+          SECRET_KEY: ci-secret
+          JWT_SECRET_KEY: ci-jwt-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/appdb
+          UPLOAD_DIR: workspace/uploads
+          FLASK_APP: app:create_app
+        run: |
+          mkdir -p workspace/uploads
+          flask db upgrade heads
+          flask db check

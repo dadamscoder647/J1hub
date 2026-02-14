@@ -12,7 +12,10 @@ from flask_migrate import Migrate
 try:
     from flask_cors import CORS as _CORS
 except Exception:
-    def _CORS(app, resources=None, supports_credentials=False, **kwargs):  # no-op if lib missing
+
+    def _CORS(
+        app, resources=None, supports_credentials=False, **kwargs
+    ):  # no-op if lib missing
         if app is None:
             return None
 
@@ -47,13 +50,15 @@ except Exception:
 
         return None
 
+
 CORS = _CORS
 
 try:
     from flask_limiter import Limiter as _Limiter
     from flask_limiter.util import get_remote_address
 except Exception:
-    class _Limiter:
+
+    class _Limiter:  # type: ignore[no-redef]
         def __init__(
             self,
             key_func=None,
@@ -132,14 +137,15 @@ except Exception:
     def get_remote_address():
         return "127.0.0.1"
 
-Limiter = _Limiter
-from werkzeug.exceptions import HTTPException, TooManyRequests
 
-from config import Config
-from models import db
-from routes.auth import auth_bp
-from routes.listings import listings_bp
-from routes.verify import verify_bp
+Limiter = _Limiter
+from werkzeug.exceptions import HTTPException, TooManyRequests  # noqa: E402
+
+from config import Config  # noqa: E402
+from models import db  # noqa: E402
+from routes.auth import auth_bp  # noqa: E402
+from routes.listings import listings_bp  # noqa: E402
+from routes.verify import verify_bp  # noqa: E402
 
 # Billing routes may be optional; import safely
 try:
@@ -152,10 +158,45 @@ jwt = JWTManager()
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _enforce_required_production_env(app: Flask) -> None:
+    """Fail fast when required production secrets are missing."""
+
+    env_name = (
+        os.getenv("APP_ENV")
+        or os.getenv("FLASK_ENV")
+        or app.config.get("APP_ENV")
+        or app.config.get("FLASK_ENV")
+        or app.config.get("ENV")
+        or ""
+    ).lower()
+
+    if env_name != "production" or app.config.get("TESTING"):
+        return
+
+    missing: list[str] = []
+
+    for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
+        value = app.config.get(key)
+        if not value or str(value).strip().lower() in {"change-me", "changeme"}:
+            missing.append(key)
+
+    stripe_key = app.config.get("STRIPE_SECRET_KEY")
+    stripe_webhook = app.config.get("STRIPE_WEBHOOK_SECRET")
+    if stripe_key and not stripe_webhook:
+        missing.append("STRIPE_WEBHOOK_SECRET")
+
+    if missing:
+        joined = ", ".join(sorted(set(missing)))
+        raise RuntimeError(
+            f"Missing required production environment variables: {joined}"
+        )
+
+
 def create_app(config_class: type[Config] = Config) -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config.from_object(config_class)
+    _enforce_required_production_env(app)
 
     # Core subsystems
     db.init_app(app)
