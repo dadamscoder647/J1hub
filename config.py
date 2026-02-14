@@ -26,6 +26,7 @@ class Config:
 
     # CORS
     _raw_origins = os.getenv("ORIGINS", "*")
+    CORS_ORIGINS: str | list[str]
     if _raw_origins.strip() == "*":
         CORS_ORIGINS = "*"
     else:
