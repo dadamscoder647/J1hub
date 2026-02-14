@@ -37,6 +37,9 @@ class Config:
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_KEY_PREFIX = os.getenv("RATELIMIT_KEY_PREFIX", "")
 
+    # API versioning
+    API_ENABLE_LEGACY_ROUTES = os.getenv("API_ENABLE_LEGACY_ROUTES", "true").lower() == "true"
+
     # Stripe / billing (optional)
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")

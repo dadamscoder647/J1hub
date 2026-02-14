@@ -1,0 +1,725 @@
+openapi: 3.0.3
+info:
+  title: J1Hub API
+  version: 1.0.0
+  description: |
+    Stable API contract for J1Hub endpoints.
+
+    ## Versioning plan
+    - Canonical versioned base path: `/api/v1`.
+    - Existing unversioned routes (`/auth`, `/verify`, `/listings`, `/billing`, `/health`, `/admin/verify/pending`) are kept as **legacy aliases** during transition.
+    - New clients should migrate to `/api/v1/*` immediately.
+
+    ## Transition strategy
+    1. **Now**: support both `/api/v1/*` and legacy endpoints.
+    2. **Deprecation window**: communicate deprecation for legacy routes via release notes and docs.
+    3. **Removal**: disable legacy aliases by configuration after migration completion.
+servers:
+  - url: /
+    description: Legacy (transition period)
+  - url: /api/v1
+    description: Canonical versioned API
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /auth/register:
+    post:
+      summary: Register user
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/ErrorResponse'
+  /auth/login:
+    post:
+      summary: Login
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /verify/upload:
+    post:
+      summary: Upload verification document
+      operationId: uploadVerificationDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [document, waiver]
+              properties:
+                document:
+                  type: string
+                  format: binary
+                waiver:
+                  oneOf:
+                    - type: boolean
+                    - type: string
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    enum: [pending, approved, rejected]
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /verify/status:
+    get:
+      summary: Verification status
+      operationId: getVerificationStatus
+      responses:
+        '200':
+          description: Current verification state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verification_status, latest_document]
+                properties:
+                  verification_status:
+                    type: string
+                    enum: [unverified, pending, approved, rejected]
+                  latest_document:
+                    oneOf:
+                      - type: 'null'
+                      - $ref: '#/components/schemas/VisaDocument'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /verify/doc/{document_id}:
+    get:
+      summary: Download verification document (admin)
+      operationId: downloadVerificationDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Binary file response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+  /admin/verify/pending:
+    get:
+      summary: List pending verification documents (admin)
+      operationId: listPendingDocuments
+      responses:
+        '200':
+          description: Pending documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingVerificationDocument'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /verify/{document_id}/approve:
+    post:
+      summary: Approve verification document (admin)
+      operationId: approveDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationDecisionResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /verify/{document_id}/reject:
+    post:
+      summary: Reject verification document (admin)
+      operationId: rejectDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                review_note:
+                  type: string
+                note:
+                  type: string
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/VerificationDecisionResponse'
+                  - type: object
+                    properties:
+                      review_note:
+                        type: string
+                        nullable: true
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /listings:
+    get:
+      summary: Search listings
+      operationId: searchListings
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+            enum: [job, housing, ride, gig]
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: city
+          schema:
+            type: string
+        - in: query
+          name: active
+          schema:
+            oneOf:
+              - type: boolean
+              - type: string
+      responses:
+        '200':
+          description: Listings search results
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, count]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Listing'
+                  count:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+    post:
+      summary: Create listing
+      operationId: createListing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingCreateRequest'
+      responses:
+        '201':
+          description: Created listing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Listing'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '402':
+          description: Billing required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /listings/{listing_id}:
+    get:
+      summary: Get listing
+      operationId: getListing
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ListingId'
+      responses:
+        '200':
+          description: Listing details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Listing'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+    patch:
+      summary: Update listing
+      operationId: updateListing
+      parameters:
+        - $ref: '#/components/parameters/ListingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListingUpdateRequest'
+      responses:
+        '200':
+          description: Updated listing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Listing'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /listings/{listing_id}/apply:
+    post:
+      summary: Apply to listing
+      operationId: applyToListing
+      parameters:
+        - $ref: '#/components/parameters/ListingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        '201':
+          description: Application created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /billing/create-checkout-session:
+    post:
+      summary: Create Stripe Checkout session
+      operationId: createCheckoutSession
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                purchase_type:
+                  type: string
+                  enum: [listing, subscription]
+                quantity:
+                  type: integer
+                success_url:
+                  type: string
+                cancel_url:
+                  type: string
+      responses:
+        '200':
+          description: Checkout session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId, url]
+                properties:
+                  sessionId:
+                    type: string
+                  url:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/ErrorResponse'
+        '502':
+          $ref: '#/components/responses/ErrorResponse'
+  /billing/webhook:
+    post:
+      summary: Stripe webhook
+      operationId: billingWebhook
+      security: []
+      responses:
+        '200':
+          description: Webhook accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: success
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/ErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ListingId:
+      in: path
+      name: listing_id
+      required: true
+      schema:
+        type: integer
+    DocumentId:
+      in: path
+      name: document_id
+      required: true
+      schema:
+        type: integer
+  responses:
+    ErrorResponse:
+      description: JSON error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, detail, request_id]
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+        request_id:
+          type: string
+    UserSummary:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [worker, employer, admin]
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        role:
+          type: string
+          enum: [worker, employer, admin]
+    RegisterResponse:
+      type: object
+      required: [message, user]
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      required: [access_token, user]
+      properties:
+        access_token:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    Listing:
+      type: object
+      required:
+        [id, category, title, description, is_public, is_active, created_by]
+      properties:
+        id:
+          type: integer
+        category:
+          type: string
+          enum: [job, housing, ride, gig]
+        title:
+          type: string
+        description:
+          type: string
+        company_name:
+          type: string
+          nullable: true
+        contact_method:
+          type: string
+          enum: [phone, email, in_app]
+          nullable: true
+        contact_value:
+          type: string
+          nullable: true
+        location_city:
+          type: string
+          nullable: true
+        pay_rate:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        shift:
+          type: string
+          nullable: true
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    ListingCreateRequest:
+      type: object
+      required: [category, title, description, contact_method, contact_value]
+      properties:
+        category:
+          type: string
+          enum: [job, housing, ride, gig]
+        title:
+          type: string
+        description:
+          type: string
+        company_name:
+          type: string
+        contact_method:
+          type: string
+          enum: [phone, email, in_app]
+        contact_value:
+          type: string
+        location_city:
+          type: string
+        pay_rate:
+          oneOf:
+            - type: number
+            - type: string
+        currency:
+          type: string
+        shift:
+          type: string
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+    ListingUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        category:
+          type: string
+          enum: [job, housing, ride, gig]
+        title:
+          type: string
+        description:
+          type: string
+        company_name:
+          type: string
+        contact_method:
+          type: string
+          enum: [phone, email, in_app]
+        contact_value:
+          type: string
+        location_city:
+          type: string
+        pay_rate:
+          oneOf:
+            - type: number
+            - type: string
+            - type: 'null'
+        currency:
+          type: string
+        shift:
+          type: string
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        expires_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    Application:
+      type: object
+      required: [id, user_id, listing_id, message, created_at]
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        listing_id:
+          type: integer
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    VisaDocument:
+      type: object
+      required: [id, user_id, filename, file_path, file_type, status, waiver_acknowledged]
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        filename:
+          type: string
+        file_path:
+          type: string
+        file_type:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        reviewer_id:
+          type: integer
+          nullable: true
+        review_note:
+          type: string
+          nullable: true
+        waiver_acknowledged:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    PendingVerificationDocument:
+      type: object
+      required: [id, user_id, filename, created_at]
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        filename:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    VerificationDecisionResponse:
+      type: object
+      required: [id, status, verification_status]
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [approved, rejected]
+        verification_status:
+          type: string
+          enum: [approved, rejected]
