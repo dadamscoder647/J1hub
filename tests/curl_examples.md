@@ -14,8 +14,8 @@ export WORKER_TOKEN="<worker access token>"
 ```bash
 curl -X POST "$BASE_URL/verify/upload" \
   -H "Authorization: Bearer $WORKER_TOKEN" \
-  -F "doc_type=passport" \
-  -F "file=@/path/to/passport.pdf"
+  -F "document=@/path/to/passport.pdf" \
+  -F "waiver=true"
 ```
 
 ## Check Verification Status
@@ -36,18 +36,23 @@ curl -X GET "$BASE_URL/admin/verify/pending" \
 
 ```bash
 curl -X POST "$BASE_URL/admin/verify/1/approve" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"notes": "Looks good"}'
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-## Admin Deny Document
+## Admin Reject Document
 
 ```bash
-curl -X POST "$BASE_URL/admin/verify/1/deny" \
+curl -X POST "$BASE_URL/admin/verify/1/reject" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"notes": "Please upload a clearer copy"}'
+  -d '{"review_note": "Please upload a clearer copy"}'
+```
+
+## Legacy Admin Alias (Deprecated)
+
+```bash
+curl -X GET "$BASE_URL/verify/pending" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ## Search Listings
