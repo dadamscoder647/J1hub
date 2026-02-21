@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from math import ceil
 from pathlib import Path
 from typing import Iterable
 
@@ -23,6 +24,9 @@ verify_bp = Blueprint("verify", __name__)
 
 MAX_UPLOAD_SIZE_DEFAULT = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS_DEFAULT = {"jpeg", "jpg", "png", "pdf"}
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 100
 
 
 def _get_current_user() -> User | None:
@@ -67,6 +71,24 @@ def _parse_bool(value: object) -> bool | None:
     return None
 
 
+def _parse_pagination_params() -> tuple[int, int]:
+    page_raw = request.args.get("page", str(DEFAULT_PAGE))
+    per_page_raw = request.args.get("per_page", str(DEFAULT_PER_PAGE))
+
+    try:
+        page = int(page_raw)
+        per_page = int(per_page_raw)
+    except (TypeError, ValueError):
+        raise BadRequest("page and per_page must be integers.") from None
+
+    if page < 1:
+        raise BadRequest("page must be greater than 0.")
+    if per_page < 1:
+        raise BadRequest("per_page must be greater than 0.")
+
+    return page, min(per_page, MAX_PER_PAGE)
+
+
 def _allowed_extensions() -> set[str]:
     configured = current_app.config.get("ALLOWED_UPLOAD_TYPES")
     if not configured:
@@ -79,6 +101,9 @@ def _allowed_extensions() -> set[str]:
         item.strip().lower().lstrip(".")
         for item in values
         if isinstance(item, str) and item.strip()
+    }
+    normalized = {
+        item.split("/", 1)[1] if "/" in item else item for item in normalized
     }
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
@@ -218,13 +243,36 @@ def list_pending_documents() -> ResponseReturnValue:
 
     _require_admin()
 
+    page, per_page = _parse_pagination_params()
+
     pending_documents = (
         VisaDocument.query.filter_by(status="pending")
-        .order_by(VisaDocument.created_at.asc())
+        .order_by(VisaDocument.created_at.asc(), VisaDocument.id.asc())
         .all()
     )
 
-    return jsonify([_serialize_pending_document(document) for document in pending_documents])
+    total = len(pending_documents)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_results = pending_documents[start:end]
+    total_pages = ceil(total / per_page) if total else 0
+
+    return jsonify(
+        {
+            "results": [
+                _serialize_pending_document(document) for document in page_results
+            ],
+            "count": len(page_results),
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+            },
+        }
+    )
 
 
 @verify_bp.record_once

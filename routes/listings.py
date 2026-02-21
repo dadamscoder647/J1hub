@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from math import ceil
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
@@ -22,6 +23,10 @@ from models.user import User
 from utils.request_validation import parse_json_request
 
 listings_bp = Blueprint("listings", __name__)
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 100
 
 
 def _get_current_user(optional: bool = False) -> User | None:
@@ -75,6 +80,24 @@ def _parse_bool(value):
     return None
 
 
+def _parse_pagination_params() -> tuple[int, int]:
+    page_raw = request.args.get("page", str(DEFAULT_PAGE))
+    per_page_raw = request.args.get("per_page", str(DEFAULT_PER_PAGE))
+
+    try:
+        page = int(page_raw)
+        per_page = int(per_page_raw)
+    except (TypeError, ValueError):
+        raise BadRequest("page and per_page must be integers.") from None
+
+    if page < 1:
+        raise BadRequest("page must be greater than 0.")
+    if per_page < 1:
+        raise BadRequest("per_page must be greater than 0.")
+
+    return page, min(per_page, MAX_PER_PAGE)
+
+
 @listings_bp.route("", methods=["GET"])
 def search_listings():
     """Return listings with optional filters."""
@@ -119,15 +142,38 @@ def search_listings():
             )
         )
 
-    listings = query.order_by(Listing.created_at.desc()).all()
+    page, per_page = _parse_pagination_params()
 
-    payload = []
+    listings = query.order_by(Listing.created_at.desc(), Listing.id.desc()).all()
+
+    visible_listings = []
     for listing in listings:
         if not _can_view_listing(listing, user):
             continue
-        payload.append(listing.to_dict(include_contact=_can_view_contact(listing, user)))
+        visible_listings.append(
+            listing.to_dict(include_contact=_can_view_contact(listing, user))
+        )
 
-    return jsonify({"results": payload, "count": len(payload)})
+    total = len(visible_listings)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_results = visible_listings[start:end]
+    total_pages = ceil(total / per_page) if total else 0
+
+    return jsonify(
+        {
+            "results": page_results,
+            "count": len(page_results),
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+            },
+        }
+    )
 
 
 def _validate_listing_payload(data: dict, partial: bool = False):
