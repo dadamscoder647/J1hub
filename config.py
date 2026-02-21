@@ -13,8 +13,8 @@ class Config:
     """
 
     # Core
-    SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
+    SECRET_KEY = os.getenv("SECRET_KEY")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -44,3 +44,19 @@ class Config:
     PRICE_MONTHLY = os.getenv("PRICE_MONTHLY")
     BILLING_SUCCESS_URL = os.getenv("BILLING_SUCCESS_URL")
     BILLING_CANCEL_URL = os.getenv("BILLING_CANCEL_URL")
+
+
+class DevelopmentConfig(Config):
+    """Local developer configuration with temporary keys for convenience."""
+
+    DEBUG = True
+    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-key")
+
+
+class TestingConfig(Config):
+    """Testing configuration with lightweight temporary keys."""
+
+    TESTING = True
+    SECRET_KEY = "test-secret-key"
+    JWT_SECRET_KEY = "test-jwt-secret-key"

@@ -151,11 +151,27 @@ migrate = Migrate()
 jwt = JWTManager()
 limiter = Limiter(key_func=get_remote_address)
 
+def _validate_secure_keys(app: Flask) -> None:
+    """Ensure required signing keys are configured for non-testing runtime."""
+
+    if app.config.get("TESTING"):
+        return
+
+    required_keys = ("SECRET_KEY", "JWT_SECRET_KEY")
+    missing = [key for key in required_keys if not app.config.get(key)]
+    if missing:
+        missing_keys = ", ".join(missing)
+        raise RuntimeError(
+            "Missing required security configuration: "
+            f"{missing_keys}. Set them via environment variables before startup."
+        )
+
 
 def create_app(config_class: type[Config] = Config) -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config.from_object(config_class)
+    _validate_secure_keys(app)
 
     # Core subsystems
     db.init_app(app)
