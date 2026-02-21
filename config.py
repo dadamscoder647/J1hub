@@ -9,7 +9,7 @@ class Config:
 
     Environment variables:
         MAX_UPLOAD_SIZE: Maximum upload size in bytes (default 10 MB).
-        ALLOWED_UPLOAD_TYPES: Comma-separated list of allowed MIME types for uploads.
+        ALLOWED_UPLOAD_RULES: Mapping of extension -> allowed MIME type(s) for uploads.
     """
 
     # Core
@@ -20,9 +20,16 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(Path("workspace") / "uploads"))
     MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 10 * 1024 * 1024))
-    ALLOWED_UPLOAD_TYPES = os.getenv(
-        "ALLOWED_UPLOAD_TYPES", "image/jpeg,image/png,application/pdf"
-    ).split(",")
+    ALLOWED_UPLOAD_RULES = {
+        "pdf": ["application/pdf"],
+        "png": ["image/png"],
+        "jpg": ["image/jpeg"],
+        "jpeg": ["image/jpeg"],
+    }
+    # Backwards-compatible flattened MIME list consumed by older checks.
+    ALLOWED_UPLOAD_TYPES = sorted(
+        {mime for mimes in ALLOWED_UPLOAD_RULES.values() for mime in mimes}
+    )
 
     # CORS
     _raw_origins = os.getenv("ORIGINS", "*")

@@ -64,7 +64,7 @@ def test_upload_and_status(app: Flask, client):
     upload_response = client.post(
         "/verify/upload",
         data={
-            "document": (BytesIO(b"PDF data"), "document.pdf"),
+            "document": (BytesIO(b"%PDF-1.7\n"), "document.pdf"),
             "waiver": "true",
         },
         headers=headers,

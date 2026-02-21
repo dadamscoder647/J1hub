@@ -34,7 +34,7 @@ def test_upload_document_creates_pending_record(app, client):
         user_id = user.id
 
     data = {
-        "document": (BytesIO(b"PDF data"), "visa.pdf"),
+        "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
         "waiver": "true",
     }
 
@@ -58,6 +58,53 @@ def test_upload_document_creates_pending_record(app, client):
     assert document.waiver_acknowledged is True
     stored_file = Path(app.config["UPLOAD_DIR"]) / document.file_path
     assert stored_file.exists()
+
+
+def test_upload_document_rejects_disallowed_extension(app, client):
+    """Uploading a file with an unsupported extension returns 400."""
+
+    with app.app_context():
+        user = _create_user("blocked-ext@example.com")
+        user_id = user.id
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"MZ\x00\x02"), "malware.exe"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+    assert "File type not allowed" in payload["detail"]
+
+
+def test_upload_document_rejects_spoofed_content(app, client):
+    """Uploading a mismatched extension/content pair is rejected."""
+
+    with app.app_context():
+        user = _create_user("spoofed@example.com")
+        user_id = user.id
+
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"data"
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(png_bytes), "identity.pdf", "application/pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+    assert "does not match the file extension" in payload["detail"]
 
 
 def test_status_endpoint_returns_latest_document(app, client):

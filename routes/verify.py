@@ -22,7 +22,18 @@ from utils.request_validation import parse_json_request
 verify_bp = Blueprint("verify", __name__)
 
 MAX_UPLOAD_SIZE_DEFAULT = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS_DEFAULT = {"jpeg", "jpg", "png", "pdf"}
+ALLOWED_UPLOAD_RULES_DEFAULT: dict[str, set[str]] = {
+    "pdf": {"application/pdf"},
+    "png": {"image/png"},
+    "jpg": {"image/jpeg"},
+    "jpeg": {"image/jpeg"},
+}
+
+
+_SIGNATURE_BYTES = {
+    "pdf": b"%PDF-",
+    "png": b"\x89PNG\r\n\x1a\n",
+}
 
 
 def _get_current_user() -> User | None:
@@ -67,35 +78,65 @@ def _parse_bool(value: object) -> bool | None:
     return None
 
 
-def _allowed_extensions() -> set[str]:
-    configured = current_app.config.get("ALLOWED_UPLOAD_TYPES")
-    if not configured:
-        return set(ALLOWED_EXTENSIONS_DEFAULT)
-    if isinstance(configured, str):
-        values: Iterable[str] = configured.split(",")
-    else:
-        values = configured
-    normalized = {
-        item.strip().lower().lstrip(".")
-        for item in values
-        if isinstance(item, str) and item.strip()
-    }
+def _get_allowed_upload_rules() -> dict[str, set[str]]:
+    configured = current_app.config.get("ALLOWED_UPLOAD_RULES")
+    normalized: dict[str, set[str]] = {}
+
+    if isinstance(configured, dict):
+        for extension, mimes in configured.items():
+            if not isinstance(extension, str):
+                continue
+            ext = extension.strip().lower().lstrip(".")
+            if not ext:
+                continue
+
+            if isinstance(mimes, str):
+                mime_values: Iterable[str] = [mimes]
+            elif isinstance(mimes, Iterable):
+                mime_values = mimes
+            else:
+                mime_values = []
+
+            parsed = {
+                mime.strip().lower()
+                for mime in mime_values
+                if isinstance(mime, str) and mime.strip()
+            }
+            if parsed:
+                normalized[ext] = parsed
+
     if not normalized:
-        return set(ALLOWED_EXTENSIONS_DEFAULT)
-    if "jpeg" in normalized:
-        normalized.add("jpg")
-    if "jpg" in normalized:
-        normalized.add("jpeg")
+        return {ext: set(mimes) for ext, mimes in ALLOWED_UPLOAD_RULES_DEFAULT.items()}
+
+    if "jpeg" in normalized and "jpg" not in normalized:
+        normalized["jpg"] = set(normalized["jpeg"])
+    if "jpg" in normalized and "jpeg" not in normalized:
+        normalized["jpeg"] = set(normalized["jpg"])
+
     return normalized
 
 
-def _validate_document(file: FileStorage) -> None:
+def _sniff_mime(header: bytes) -> str | None:
+    if header.startswith(_SIGNATURE_BYTES["pdf"]):
+        return "application/pdf"
+    if header.startswith(_SIGNATURE_BYTES["png"]):
+        return "image/png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
+
+
+def _validate_document(file: FileStorage) -> str:
     if file.filename is None or file.filename.strip() == "":
         raise BadRequest("A document file is required.")
 
+    if "." not in file.filename:
+        raise BadRequest("File must include a valid extension.")
+
+    allowed_rules = _get_allowed_upload_rules()
     extension = file.filename.rsplit(".", 1)[-1].lower()
-    if extension not in _allowed_extensions():
-        allowed = ", ".join(sorted(_allowed_extensions()))
+    if extension not in allowed_rules:
+        allowed = ", ".join(sorted(allowed_rules))
         raise BadRequest(f"File type not allowed. Allowed types: {allowed}.")
 
     max_size = int(current_app.config.get("MAX_UPLOAD_SIZE", MAX_UPLOAD_SIZE_DEFAULT))
@@ -104,6 +145,22 @@ def _validate_document(file: FileStorage) -> None:
     file.stream.seek(0)
     if size > max_size:
         raise BadRequest("File exceeds the maximum upload size of 10MB.")
+
+    header = file.stream.read(16)
+    file.stream.seek(0)
+    sniffed_mime = _sniff_mime(header)
+    if sniffed_mime is None:
+        raise BadRequest("Unsupported or suspicious file content.")
+
+    allowed_mimes = allowed_rules[extension]
+    if sniffed_mime not in allowed_mimes:
+        raise BadRequest("File content does not match the file extension.")
+
+    declared_mime = (file.mimetype or "").lower().strip()
+    if declared_mime and declared_mime not in allowed_mimes:
+        raise BadRequest("Uploaded MIME type does not match the file extension.")
+
+    return sniffed_mime
 
 
 def _build_unique_filename(original: str) -> str:
@@ -136,7 +193,7 @@ def upload_document():
     if not isinstance(file, FileStorage):
         raise BadRequest("A document file is required.")
 
-    _validate_document(file)
+    sniffed_mime = _validate_document(file)
 
     waiver_value = _parse_bool(request.form.get("waiver"))
     if waiver_value is None:
@@ -150,7 +207,7 @@ def upload_document():
         user_id=user.id,
         filename=file.filename or stored_filename,
         file_path=stored_path,
-        file_type=file.mimetype or "application/octet-stream",
+        file_type=sniffed_mime,
         waiver_acknowledged=waiver_value,
         status="pending",
     )
