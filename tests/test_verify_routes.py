@@ -149,14 +149,76 @@ def test_admin_list_pending_documents_returns_only_pending(app, client):
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert isinstance(payload, list)
-    assert [item["id"] for item in payload] == [pending_old_id, pending_new_id]
-    for item in payload:
+    assert payload["count"] == 2
+    assert payload["pagination"] == {
+        "page": 1,
+        "per_page": 20,
+        "total": 2,
+        "total_pages": 1,
+        "has_next": False,
+        "has_prev": False,
+    }
+    assert [item["id"] for item in payload["results"]] == [pending_old_id, pending_new_id]
+    for item in payload["results"]:
         assert set(item.keys()) == {"id", "user_id", "filename", "created_at"}
         assert item["created_at"] is not None
         # Ensure ISO-8601 parseable string
         parsed = datetime.fromisoformat(item["created_at"])
         assert isinstance(parsed, datetime)
+
+
+def test_admin_list_pending_documents_pagination_and_limit_cap(app, client):
+    """Admin pending list supports paging and caps per_page to max."""
+
+    with app.app_context():
+        admin = _create_user("admin-paging@example.com", role="admin")
+        worker = _create_user("pending-paging@example.com")
+        base_time = datetime.utcnow() - timedelta(days=1)
+        documents = [
+            VisaDocument(
+                user_id=worker.id,
+                filename=f"doc-{index}.pdf",
+                file_path=f"doc-{index}.pdf",
+                file_type="application/pdf",
+                status="pending",
+                waiver_acknowledged=True,
+                created_at=base_time + timedelta(minutes=index),
+            )
+            for index in range(101)
+        ]
+        db.session.add_all(documents)
+        db.session.commit()
+        admin_id = admin.id
+
+    page_two_response = client.get(
+        "/admin/verify/pending?page=2&per_page=2",
+        headers=_auth_headers(app, admin_id),
+    )
+    assert page_two_response.status_code == 200
+    page_two_payload = page_two_response.get_json()
+    assert page_two_payload["count"] == 2
+    assert [item["filename"] for item in page_two_payload["results"]] == [
+        "doc-2.pdf",
+        "doc-3.pdf",
+    ]
+    assert page_two_payload["pagination"] == {
+        "page": 2,
+        "per_page": 2,
+        "total": 101,
+        "total_pages": 51,
+        "has_next": True,
+        "has_prev": True,
+    }
+
+    capped_response = client.get(
+        "/admin/verify/pending?page=1&per_page=1000",
+        headers=_auth_headers(app, admin_id),
+    )
+    assert capped_response.status_code == 200
+    capped_payload = capped_response.get_json()
+    assert capped_payload["count"] == 100
+    assert capped_payload["pagination"]["per_page"] == 100
+    assert capped_payload["pagination"]["total_pages"] == 2
 
 
 def test_admin_can_download_document(app, client):
