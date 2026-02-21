@@ -9,6 +9,13 @@ class Application(db.Model):
     """Represents a worker application for a listing."""
 
     __tablename__ = "applications"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "listing_id",
+            name="uq_applications_user_id_listing_id",
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
