@@ -75,7 +75,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    user_columns = {column["name"]: column for column in inspector.get_columns("users")}
 
     verification_status_enum = sa.Enum(
         "unverified",
@@ -86,15 +86,17 @@ def upgrade() -> None:
     )
 
     if "verification_status" in user_columns:
-        op.alter_column(
-            "users",
-            "verification_status",
-            existing_type=verification_status_enum,
-            type_=sa.String(length=32),
-            existing_nullable=False,
-            postgresql_using="verification_status::text",
-        )
-        op.execute(f"DROP TYPE IF EXISTS {USER_VERIFICATION_STATUS_ENUM}")
+        verification_status_type = user_columns["verification_status"]["type"]
+        if hasattr(verification_status_type, "enums"):
+            op.alter_column(
+                "users",
+                "verification_status",
+                existing_type=verification_status_type,
+                type_=sa.String(length=32),
+                existing_nullable=False,
+                postgresql_using="verification_status::text",
+            )
+            op.execute(f"DROP TYPE IF EXISTS {USER_VERIFICATION_STATUS_ENUM}")
     else:
         op.add_column(
             "users",
@@ -128,28 +130,30 @@ def downgrade() -> None:
     table_names = set(inspector.get_table_names())
 
     if "users" in table_names:
-        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        user_columns = {column["name"]: column for column in inspector.get_columns("users")}
 
         if "is_active" in user_columns:
             op.drop_column("users", "is_active")
 
         if "verification_status" in user_columns:
-            verification_status_enum = sa.Enum(
-                "unverified",
-                "pending",
-                "approved",
-                "rejected",
-                name=USER_VERIFICATION_STATUS_ENUM,
-            )
-            verification_status_enum.create(bind, checkfirst=True)
-            op.alter_column(
-                "users",
-                "verification_status",
-                existing_type=sa.String(length=32),
-                type_=verification_status_enum,
-                existing_nullable=False,
-                postgresql_using="verification_status::verification_status",
-            )
+            verification_status_type = user_columns["verification_status"]["type"]
+            if not hasattr(verification_status_type, "enums"):
+                verification_status_enum = sa.Enum(
+                    "unverified",
+                    "pending",
+                    "approved",
+                    "rejected",
+                    name=USER_VERIFICATION_STATUS_ENUM,
+                )
+                verification_status_enum.create(bind, checkfirst=True)
+                op.alter_column(
+                    "users",
+                    "verification_status",
+                    existing_type=sa.String(length=32),
+                    type_=verification_status_enum,
+                    existing_nullable=False,
+                    postgresql_using="verification_status::verification_status",
+                )
 
     if "visa_documents" in table_names:
         existing_indexes = {index["name"] for index in inspector.get_indexes("visa_documents")}
