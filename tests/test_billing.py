@@ -18,6 +18,28 @@ def _create_employer(email: str = "employer@example.com") -> int:
     return user.id
 
 
+def test_webhook_requires_webhook_secret(app, client):
+    """Webhook should return server configuration error when secret is missing."""
+
+    app.config["STRIPE_WEBHOOK_SECRET"] = None
+
+    response = client.post(
+        "/billing/webhook", data=b"{}", headers={"Stripe-Signature": "sig"}
+    )
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "Stripe webhook secret is not configured."}
+
+
+def test_webhook_rejects_unsigned_payload(app, client):
+    """Webhook should reject payloads that are not signed by Stripe."""
+
+    response = client.post("/billing/webhook", data=b"{}")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid webhook signature."}
+
+
 def test_webhook_adds_listing_credits(app, client, monkeypatch):
     """Webhook should add listing credits for completed checkout sessions."""
 

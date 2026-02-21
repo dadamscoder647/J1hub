@@ -186,11 +186,11 @@ def billing_webhook():
     sig_header = request.headers.get("Stripe-Signature")
     webhook_secret = current_app.config.get("STRIPE_WEBHOOK_SECRET")
 
+    if not webhook_secret:
+        return jsonify({"error": "Stripe webhook secret is not configured."}), 500
+
     try:
-        if webhook_secret:
-            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-        else:  # pragma: no cover - fallback path
-            event = stripe.Event.construct_from(request.get_json(force=True), stripe.api_key)
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except (ValueError, stripe.error.SignatureVerificationError):
         return jsonify({"error": "Invalid webhook signature."}), 400
 
