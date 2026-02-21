@@ -17,8 +17,14 @@ class LocalStorage(AbstractStorage):
     """Persist files to the local filesystem under the configured upload directory."""
 
     def __init__(self, upload_dir: str | None = None):
-        self.base_directory = Path(upload_dir or Config.UPLOAD_DIR)
+        self.base_directory = Path(upload_dir or Config.UPLOAD_DIR).resolve()
         os.makedirs(self.base_directory, exist_ok=True)
+
+    def _resolve_relative_path(self, path: str) -> Path:
+        candidate = (self.base_directory / path).resolve()
+        if self.base_directory not in candidate.parents and candidate != self.base_directory:
+            raise ValueError("Path must remain within the upload directory.")
+        return candidate
 
     def save(self, file_obj: IO[bytes], filename: str) -> str:
         """Save a file and return the relative path within the upload directory."""
@@ -27,7 +33,7 @@ class LocalStorage(AbstractStorage):
         if not safe_name:
             raise ValueError("Filename must contain at least one valid character.")
 
-        destination = self.base_directory / safe_name
+        destination = self._resolve_relative_path(safe_name)
         if hasattr(file_obj, "save"):
             file_obj.save(destination)  # type: ignore[arg-type]
         else:
@@ -39,9 +45,12 @@ class LocalStorage(AbstractStorage):
     def exists(self, path: str) -> bool:
         """Return True if the given relative path exists within the upload directory."""
 
-        return (self.base_directory / path).exists()
+        try:
+            return self._resolve_relative_path(path).exists()
+        except ValueError:
+            return False
 
     def open(self, path: str, mode: str = "rb") -> BinaryIO:
         """Open a stored file using the provided mode."""
 
-        return open(self.base_directory / path, mode)
+        return open(self._resolve_relative_path(path), mode)
