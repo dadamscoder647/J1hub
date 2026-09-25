@@ -36,7 +36,7 @@ def upgrade() -> None:
         ),
     )
     op.execute(
-        "UPDATE users SET verification_status='approved' WHERE is_verified = 1"
+        "UPDATE users SET verification_status='approved' WHERE is_verified IS TRUE"
     )
     op.alter_column("users", "verification_status", server_default=None)
 
@@ -50,7 +50,7 @@ def upgrade() -> None:
         ),
     )
     op.execute(
-        "UPDATE visa_documents SET waiver_acknowledged=0 WHERE waiver_acknowledged IS NULL"
+        "UPDATE visa_documents SET waiver_acknowledged=FALSE WHERE waiver_acknowledged IS NULL"
     )
     op.alter_column(
         "visa_documents",
