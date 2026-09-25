@@ -25,6 +25,14 @@ def upgrade():
     op.execute(f"DROP TYPE IF EXISTS {VISA_DOCUMENT_STATUS_NAME}")
     op.execute("DROP TYPE IF EXISTS visa_document_type")
 
+    visa_document_status = sa.Enum(
+        "pending",
+        "approved",
+        "rejected",
+        name=VISA_DOCUMENT_STATUS_NAME,
+    )
+    visa_document_status.create(op.get_bind(), checkfirst=True)
+
     op.create_table(
         "visa_documents",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -34,12 +42,7 @@ def upgrade():
         sa.Column("file_type", sa.String(length=128), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(
-                "pending",
-                "approved",
-                "rejected",
-                name=VISA_DOCUMENT_STATUS_NAME,
-            ),
+            visa_document_status,
             nullable=False,
             server_default=sa.text("'pending'"),
         ),
@@ -69,19 +72,29 @@ def downgrade():
     op.drop_table("visa_documents")
     op.execute(f"DROP TYPE IF EXISTS {VISA_DOCUMENT_STATUS_NAME}")
 
+    visa_document_type = sa.Enum("passport", "j1_visa", name="visa_document_type")
+    visa_document_status = sa.Enum(
+        "pending",
+        "approved",
+        "denied",
+        name=VISA_DOCUMENT_STATUS_NAME,
+    )
+    visa_document_type.create(op.get_bind(), checkfirst=True)
+    visa_document_status.create(op.get_bind(), checkfirst=True)
+
     op.create_table(
         "visa_documents",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column(
             "doc_type",
-            sa.Enum("passport", "j1_visa", name="visa_document_type"),
+            visa_document_type,
             nullable=False,
         ),
         sa.Column("file_url", sa.String(length=512), nullable=False),
         sa.Column(
             "status",
-            sa.Enum("pending", "approved", "denied", name=VISA_DOCUMENT_STATUS_NAME),
+            visa_document_status,
             nullable=False,
         ),
         sa.Column("notes", sa.Text(), nullable=True),
