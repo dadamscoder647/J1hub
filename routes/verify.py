@@ -80,6 +80,7 @@ def _allowed_extensions() -> set[str]:
         for item in values
         if isinstance(item, str) and item.strip()
     }
+    normalized = {item.split("/", 1)[1] if "/" in item else item for item in normalized}
     if not normalized:
         return set(ALLOWED_EXTENSIONS_DEFAULT)
     if "jpeg" in normalized:
