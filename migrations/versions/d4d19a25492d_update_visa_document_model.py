@@ -128,18 +128,19 @@ def _migrate_old_to_new_columns(bind) -> None:
 def _migrate_status_enum() -> None:
     """Map legacy status values and migrate status enum definition."""
 
-    op.execute("UPDATE visa_documents SET status='rejected' WHERE status='denied'")
-
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute(
             "ALTER TABLE visa_documents ALTER COLUMN status TYPE VARCHAR(32) USING status::text"
         )
+        op.execute("UPDATE visa_documents SET status='rejected' WHERE status='denied'")
         op.execute(f"DROP TYPE IF EXISTS {VISA_DOCUMENT_STATUS_NAME}")
         NEW_STATUS_ENUM.create(bind, checkfirst=True)
         op.execute(
             f"ALTER TABLE visa_documents ALTER COLUMN status TYPE {VISA_DOCUMENT_STATUS_NAME} USING status::{VISA_DOCUMENT_STATUS_NAME}"
         )
+    else:
+        op.execute("UPDATE visa_documents SET status='rejected' WHERE status='denied'")
 
 
 def upgrade():
