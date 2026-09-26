@@ -4,7 +4,7 @@ Flask-Migrate
 Flask-Cors
 Flask-Limiter
 SQLAlchemy
-psycopg2-binary
+psycopg[binary]
 python-dotenv
 stripe>=15.6,<16
 boto3

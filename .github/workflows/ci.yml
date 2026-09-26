@@ -103,7 +103,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/appdb
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/appdb
       UPLOAD_DIR: workspace/uploads
       FLASK_APP: app:create_app
     steps:
