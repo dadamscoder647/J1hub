@@ -128,7 +128,8 @@ paths:
           $ref: '#/components/responses/ErrorResponse'
   /verify/upload:
     post:
-      summary: Upload verification document
+      summary: Upload verification document (worker)
+      description: Requires an authenticated worker account.
       operationId: uploadVerificationDocument
       requestBody:
         required: true
@@ -163,9 +164,12 @@ paths:
           $ref: '#/components/responses/ErrorResponse'
         '401':
           $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
   /verify/status:
     get:
-      summary: Verification status
+      summary: Verification status (worker)
+      description: Requires an authenticated worker account.
       operationId: getVerificationStatus
       responses:
         '200':
@@ -184,6 +188,8 @@ paths:
                       - type: 'null'
                       - $ref: '#/components/schemas/VisaDocument'
         '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
           $ref: '#/components/responses/ErrorResponse'
   /verify/doc/{document_id}:
     get:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 
+import pytest
 from flask import Flask
+from flask.wrappers import Request as FlaskRequest
 from flask_jwt_extended import create_access_token
 
 from models import db
@@ -89,6 +92,59 @@ def test_upload_and_status(app: Flask, client):
     with app.app_context():
         refreshed_user = User.query.get(user_id)
     assert refreshed_user.verification_status == "pending"
+
+
+@pytest.mark.parametrize("role", ["employer", "admin"])
+@pytest.mark.parametrize("prefix", ["/verify", "/api/v1/verify"])
+def test_non_workers_cannot_upload_or_read_verification_status(
+    app: Flask, client, monkeypatch, role: str, prefix: str
+):
+    """Only workers may use verification upload and status in either API path."""
+
+    user_id, token = _register_and_login(
+        app,
+        client,
+        f"{role}-verification-boundary@example.com",
+        "secret123",
+        role=role,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    with app.app_context():
+        initial_user = User.query.get(user_id)
+        initial_status = initial_user.verification_status
+        initial_is_verified = initial_user.is_verified
+        initial_document_count = VisaDocument.query.filter_by(user_id=user_id).count()
+
+    parser_accessed = False
+    original_load_form_data = FlaskRequest._load_form_data
+
+    def record_form_parse(request):
+        nonlocal parser_accessed
+        parser_accessed = True
+        return original_load_form_data(request)
+
+    monkeypatch.setattr(FlaskRequest, "_load_form_data", record_form_parse)
+
+    upload_response = client.post(
+        f"{prefix}/upload",
+        data=b"malformed multipart body",
+        headers=headers,
+        content_type="multipart/form-data; boundary=missing",
+    )
+    assert parser_accessed is False
+    assert upload_response.status_code == 403
+
+    status_response = client.get(f"{prefix}/status", headers=headers)
+    assert status_response.status_code == 403
+
+    with app.app_context():
+        user = User.query.get(user_id)
+        assert user.verification_status == initial_status
+        assert user.is_verified is initial_is_verified
+        assert VisaDocument.query.filter_by(user_id=user_id).count() == initial_document_count
+
+    upload_directory = Path(app.config["UPLOAD_DIR"])
+    assert not any(path.is_file() for path in upload_directory.rglob("*"))
 
 
 def test_admin_approve(app: Flask, client):

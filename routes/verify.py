@@ -73,6 +73,13 @@ def _require_admin() -> User:
     return user
 
 
+def _require_worker() -> User:
+    user = _require_user()
+    if user.role != "worker":
+        raise Forbidden("Worker privileges required.")
+    return user
+
+
 def _parse_bool(value: object) -> bool | None:
     if value is None:
         return None
@@ -221,7 +228,7 @@ def _update_user_status(user: User, status: str) -> None:
 def upload_document():
     """Upload a document for verification and create a pending record."""
 
-    user = _require_user()
+    user = _require_worker()
 
     file = request.files.get("document")
     if not isinstance(file, FileStorage):
@@ -258,7 +265,7 @@ def upload_document():
 def verification_status():
     """Return the verification status and latest document metadata."""
 
-    user = _require_user()
+    user = _require_worker()
 
     latest_document = (
         VisaDocument.query.filter_by(user_id=user.id)
