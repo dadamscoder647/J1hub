@@ -76,4 +76,12 @@ def downgrade():
     op.drop_table('visa_documents')
     op.drop_table('listings')
     op.drop_table('users')
+    if op.get_bind().dialect.name == "postgresql":
+        for enum_name in (
+            "listing_category",
+            "listing_contact_method",
+            "visa_document_type",
+            "visa_document_status",
+        ):
+            op.execute(f"DROP TYPE IF EXISTS {enum_name}")
     # ### end Alembic commands ###
