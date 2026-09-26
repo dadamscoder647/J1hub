@@ -1,6 +1,7 @@
 pytest
 pytest-cov
 jsonschema
+PyYAML
 pre-commit
 ruff
 mypy

@@ -5,6 +5,42 @@ from pathlib import Path
 from typing import ClassVar
 
 
+def _normalize_database_url(database_url: str) -> str:
+    """Select Psycopg 3 for PostgreSQL URLs that do not name a driver."""
+    for prefix in ("postgresql://", "postgres://"):
+        if database_url.startswith(prefix):
+            return database_url.replace(prefix, "postgresql+psycopg://", 1)
+    return database_url
+
+
+def _frontend_settings(
+    frontend_url: str | None,
+    raw_origins: str | None,
+    success_url: str | None,
+    cancel_url: str | None,
+) -> tuple[str | list[str], str | None, str | None]:
+    """Derive safe CORS and billing return defaults from the deployed frontend."""
+    frontend_base = (frontend_url or "").strip().rstrip("/")
+    origins_value = raw_origins if raw_origins is not None else frontend_base or "*"
+    origins: str | list[str]
+    if origins_value.strip() == "*":
+        origins = "*"
+    else:
+        origins = [origin.strip() for origin in origins_value.split(",") if origin.strip()]
+
+    generated_success_url = (
+        f"{frontend_base}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+        if frontend_base
+        else None
+    )
+    generated_cancel_url = f"{frontend_base}/billing/cancel" if frontend_base else None
+    return (
+        origins,
+        success_url or generated_success_url,
+        cancel_url or generated_cancel_url,
+    )
+
+
 class Config:
     """Base configuration for the Flask application.
 
@@ -18,11 +54,9 @@ class Config:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
     ENV = os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or os.getenv("ENV") or "production"
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
-    if DATABASE_URL.startswith("postgresql://"):
-        DATABASE_URL = DATABASE_URL.replace(
-            "postgresql://", "postgresql+psycopg://", 1
-        )
+    DATABASE_URL = _normalize_database_url(
+        os.getenv("DATABASE_URL", "sqlite:///app.db")
+    )
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(Path("workspace") / "uploads"))
@@ -43,13 +77,14 @@ class Config:
         if mime.strip()
     ]
 
-    # CORS
-    _raw_origins = os.getenv("ORIGINS", "*")
-    CORS_ORIGINS: str | list[str]
-    if _raw_origins.strip() == "*":
-        CORS_ORIGINS = "*"
-    else:
-        CORS_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    # CORS and frontend billing return URLs
+    FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+    CORS_ORIGINS, BILLING_SUCCESS_URL, BILLING_CANCEL_URL = _frontend_settings(
+        FRONTEND_URL,
+        os.getenv("ORIGINS"),
+        os.getenv("BILLING_SUCCESS_URL"),
+        os.getenv("BILLING_CANCEL_URL"),
+    )
 
     # Rate limiting
     RATE_LIMIT = os.getenv("RATE_LIMIT", "60 per minute")
@@ -65,8 +100,6 @@ class Config:
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
     PRICE_LISTING = os.getenv("PRICE_LISTING")
     PRICE_MONTHLY = os.getenv("PRICE_MONTHLY")
-    BILLING_SUCCESS_URL = os.getenv("BILLING_SUCCESS_URL")
-    BILLING_CANCEL_URL = os.getenv("BILLING_CANCEL_URL")
 
 
 class DevelopmentConfig(Config):
