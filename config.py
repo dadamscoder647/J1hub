@@ -19,6 +19,10 @@ class Config:
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
     ENV = os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or os.getenv("ENV") or "production"
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///app.db")
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgresql://", "postgresql+psycopg://", 1
+        )
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(Path("workspace") / "uploads"))
