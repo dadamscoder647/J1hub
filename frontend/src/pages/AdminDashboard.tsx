@@ -1,19 +1,27 @@
 import { useEffect, useState } from 'react';
 import { verifyService } from '../api/services';
-import { PendingVerificationDocument } from '../types/api';
+import type { PaginatedResponse, PendingVerificationDocument } from '../types/api';
+
+type PendingPagination = PaginatedResponse<PendingVerificationDocument>['pagination'];
 
 export function AdminDashboard() {
   const [pending, setPending] = useState<PendingVerificationDocument[]>([]);
+  const [pagination, setPagination] = useState<PendingPagination | null>(null);
   const [reviewNote, setReviewNote] = useState('Incomplete document');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function load() {
+  async function load(page = pagination?.page ?? 1) {
     setLoading(true);
     setError('');
     try {
-      const response = await verifyService.pending();
+      let response = await verifyService.pending(page);
+      const lastPage = response.pagination.total_pages;
+      if (lastPage > 0 && page > lastPage) {
+        response = await verifyService.pending(lastPage);
+      }
       setPending(response.results);
+      setPagination(response.pagination);
     } catch {
       setError('Failed to load pending verification documents.');
     } finally {
@@ -60,6 +68,27 @@ export function AdminDashboard() {
       </label>
       {loading && <p>Loading pending documents...</p>}
       {!loading && pending.length === 0 && <p>No pending documents.</p>}
+      {pagination && pagination.total > 0 && (
+        <nav aria-label="Pending verification pages">
+          <button
+            type="button"
+            disabled={loading || !pagination.has_prev}
+            onClick={() => void load(pagination.page - 1)}
+          >
+            Previous page
+          </button>{' '}
+          <span role="status">
+            Page {pagination.page} of {pagination.total_pages} ({pagination.total} pending)
+          </span>{' '}
+          <button
+            type="button"
+            disabled={loading || !pagination.has_next}
+            onClick={() => void load(pagination.page + 1)}
+          >
+            Next page
+          </button>
+        </nav>
+      )}
       {pending.map((doc) => (
         <article key={doc.id} style={{ border: '1px solid #ddd', margin: '8px 0', padding: 8 }}>
           <p>#{doc.id} user={doc.user_id} file={doc.filename}</p>

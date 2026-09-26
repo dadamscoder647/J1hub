@@ -72,17 +72,85 @@ test('admin reads the paginated queue and approves a document', async ({ page })
     localStorage.setItem('j1hub_access_token', 'admin-token');
     localStorage.setItem('j1hub_user', JSON.stringify({ id: 3, email: 'a@test.com', role: 'admin' }));
   });
-  let pending = [{ id: 5, filename: 'visa.pdf', user_id: 9, created_at: '2026-09-25T10:00:00' }];
-  await page.route(`${api}/admin/verify/pending`, async (route) =>
-    route.fulfill({ status: 200, body: JSON.stringify({ results: pending, count: pending.length, pagination: { page: 1, per_page: 20, total: pending.length, total_pages: 1, has_next: false, has_prev: false } }) })
-  );
-  await page.route(`${api}/admin/verify/5/approve`, async (route) => {
-    pending = [];
-    await route.fulfill({ status: 200, body: JSON.stringify({ id: 5, status: 'approved' }) });
+  let pending = Array.from({ length: 21 }, (_, index) => ({
+    id: index + 1,
+    filename: `visa-${index + 1}.pdf`,
+    user_id: 9,
+    created_at: `2026-09-25T10:${String(index).padStart(2, '0')}:00`,
+  }));
+  await page.route((targetUrl) => targetUrl.pathname.endsWith('/api/v1/admin/verify/pending'), async (route) => {
+    const url = new URL(route.request().url());
+    const requestedPage = Number(url.searchParams.get('page') ?? '1');
+    const perPageParameter = url.searchParams.get('per_page');
+    expect(perPageParameter).toBe('20');
+    const perPage = Number(perPageParameter);
+    const totalPages = Math.ceil(pending.length / perPage);
+    const pageNumber = requestedPage;
+    const start = (pageNumber - 1) * perPage;
+    const results = pending.slice(start, start + perPage);
+    return route.fulfill({
+      status: 200,
+      body: JSON.stringify({
+        results,
+        count: results.length,
+        pagination: {
+          page: pageNumber,
+          per_page: perPage,
+          total: pending.length,
+          total_pages: totalPages,
+          has_next: pageNumber < totalPages,
+          has_prev: pageNumber > 1,
+        },
+      }),
+    });
+  });
+  await page.route(`${api}/admin/verify/21/approve`, async (route) => {
+    pending = pending.filter((document) => document.id !== 21);
+    await route.fulfill({ status: 200, body: JSON.stringify({ id: 21, status: 'approved' }) });
   });
 
   await page.goto('/admin');
-  await expect(page.getByText('visa.pdf')).toBeVisible();
-  await page.getByRole('button', { name: 'Approve' }).click();
+  await expect(page.getByText('visa-1.pdf')).toBeVisible();
+  await expect(page.getByText('visa-21.pdf')).not.toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Page 1 of 2 (21 pending)');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await expect(page.getByText('visa-21.pdf')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Page 2 of 2 (21 pending)');
+  await page.getByRole('button', { name: 'Previous page' }).click();
+  await expect(page.getByText('visa-1.pdf')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Page 1 of 2 (21 pending)');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await page.getByRole('article').filter({ hasText: 'visa-21.pdf' }).getByRole('button', { name: 'Approve' }).click();
+  await expect(page.getByText('visa-20.pdf')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Page 1 of 1 (20 pending)');
+  await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
+});
+
+test('admin sees an empty queue without pagination controls', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('j1hub_access_token', 'admin-token');
+    localStorage.setItem('j1hub_user', JSON.stringify({ id: 3, email: 'a@test.com', role: 'admin' }));
+  });
+  await page.route((url) => url.pathname.endsWith('/api/v1/admin/verify/pending'), async (route) =>
+    route.fulfill({
+      status: 200,
+      body: JSON.stringify({
+        results: [],
+        count: 0,
+        pagination: {
+          page: 1,
+          per_page: 20,
+          total: 0,
+          total_pages: 0,
+          has_next: false,
+          has_prev: false,
+        },
+      }),
+    })
+  );
+
+  await page.goto('/admin');
   await expect(page.getByText('No pending documents.')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Pending verification pages' })).toHaveCount(0);
 });

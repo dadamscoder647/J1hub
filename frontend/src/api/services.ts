@@ -31,9 +31,10 @@ export const verifyService = {
     const { data } = await client.get<VerificationStatusResponse>('/verify/status');
     return data;
   },
-  pending: async () => {
+  pending: async (page = 1, perPage = 20) => {
     const { data } = await client.get<PaginatedResponse<PendingVerificationDocument>>(
-      '/admin/verify/pending'
+      '/admin/verify/pending',
+      { params: { page, per_page: perPage } }
     );
     return data;
   },
