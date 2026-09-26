@@ -83,6 +83,29 @@ def test_upload_document_rejects_disallowed_extension(app, client):
     assert "File type not allowed" in payload["detail"]
 
 
+def test_upload_request_size_is_capped_before_file_parsing(app, client):
+    """Oversized multipart bodies are rejected by Flask before upload parsing."""
+
+    with app.app_context():
+        user = _create_user("oversized@example.com")
+        user_id = user.id
+    app.config["MAX_CONTENT_LENGTH"] = 128
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n" + b"x" * 1024), "large.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 413
+    with app.app_context():
+        assert VisaDocument.query.count() == 0
+
+
 def test_upload_document_rejects_spoofed_content(app, client):
     """Uploading a mismatched extension/content pair is rejected."""
 
@@ -207,7 +230,10 @@ def test_admin_list_pending_documents_returns_only_pending(app, client):
         "has_next": False,
         "has_prev": False,
     }
-    assert [item["id"] for item in payload["results"]] == [pending_old_id, pending_new_id]
+    assert [item["id"] for item in payload["results"]] == [
+        pending_old_id,
+        pending_new_id,
+    ]
     for item in payload["results"]:
         assert set(item.keys()) == {"id", "user_id", "filename", "created_at"}
         assert item["created_at"] is not None
@@ -386,7 +412,6 @@ def test_admin_reject_updates_note_and_status(app, client):
     assert refreshed_user.is_verified is False
 
 
-
 def test_legacy_admin_routes_include_deprecation_warning(app, client):
     """Legacy /verify admin aliases remain available but emit warning header."""
 
@@ -419,6 +444,7 @@ def test_legacy_admin_routes_include_deprecation_warning(app, client):
     assert "deprecated" in response_pending.headers.get("Warning", "").lower()
     assert response_approve.status_code == 200
     assert "deprecated" in response_approve.headers.get("Warning", "").lower()
+
 
 def test_non_admin_cannot_access_admin_routes(app, client):
     """Workers cannot access admin-only verification routes."""

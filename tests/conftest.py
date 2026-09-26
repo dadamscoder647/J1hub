@@ -20,6 +20,8 @@ from models import db
 
 class _BaseTestConfig(Config):
     TESTING = True
+    SECRET_KEY = "test-secret-key-for-j1hub-tests-2026"
+    JWT_SECRET_KEY = "test-jwt-secret-key-for-j1hub-tests-2026"
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     STRIPE_SECRET_KEY = "sk_test"

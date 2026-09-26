@@ -46,8 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SECRET_KEY: ci-secret
-      JWT_SECRET_KEY: ci-jwt-secret
+      SECRET_KEY: ci-secret-only-test-key-for-j1hub-unit-workflows
+      JWT_SECRET_KEY: ci-jwt-secret-only-test-key-for-j1hub-workflows
       DATABASE_URL: sqlite:///test.db
       UPLOAD_DIR: workspace/uploads
     steps:
@@ -105,8 +105,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      SECRET_KEY: ci-secret
-      JWT_SECRET_KEY: ci-jwt-secret
+      SECRET_KEY: ci-secret-only-test-key-for-j1hub-migration-workflows
+      JWT_SECRET_KEY: ci-jwt-secret-only-test-key-for-j1hub-migrations
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/appdb
       UPLOAD_DIR: workspace/uploads
       FLASK_APP: app:create_app

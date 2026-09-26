@@ -23,6 +23,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(Path("workspace") / "uploads"))
     MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))
+    MAX_CONTENT_LENGTH = MAX_UPLOAD_SIZE + (64 * 1024)
     ALLOWED_UPLOAD_RULES: ClassVar[dict[str, list[str]]] = {
         "pdf": ["application/pdf"],
         "png": ["image/png"],

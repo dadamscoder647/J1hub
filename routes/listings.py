@@ -12,7 +12,7 @@ from flask_jwt_extended import (
     jwt_required,
     verify_jwt_in_request,
 )
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
@@ -240,7 +240,7 @@ def create_listing():
             subscription and subscription.has_active_subscription(now)
         )
         if not has_active_subscription:
-            if not subscription or (subscription.listing_credits or 0) <= 0:
+            if not subscription:
                 return (
                     jsonify(
                         {
@@ -252,7 +252,27 @@ def create_listing():
                     ),
                     402,
                 )
-            subscription.listing_credits -= 1
+            credit_update = db.session.execute(
+                update(EmployerSubscription)
+                .where(
+                    EmployerSubscription.id == subscription.id,
+                    EmployerSubscription.listing_credits > 0,
+                )
+                .values(listing_credits=EmployerSubscription.listing_credits - 1)
+                .execution_options(synchronize_session=False)
+            )
+            if credit_update.rowcount != 1:
+                return (
+                    jsonify(
+                        {
+                            "error": (
+                                "Listing credits or an active subscription is required "
+                                "to post listings."
+                            )
+                        }
+                    ),
+                    402,
+                )
 
     listing = Listing(
         category=data.get("category"),
@@ -275,8 +295,6 @@ def create_listing():
         created_by=user.id,
     )
     db.session.add(listing)
-    if subscription is not None:
-        db.session.add(subscription)
     db.session.commit()
 
     return jsonify(listing.to_dict(include_contact=True)), 201

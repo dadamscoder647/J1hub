@@ -70,6 +70,26 @@ def test_listing_creation_consumes_credit(app, client):
         assert Listing.query.count() == 1
 
 
+def test_listing_credit_cannot_be_spent_twice(app, client):
+    """Once the atomic credit update spends the last credit, later posts fail."""
+
+    with app.app_context():
+        user_id = _create_employer("single-credit@example.com")
+        db.session.add(EmployerSubscription(user_id=user_id, listing_credits=1))
+        db.session.commit()
+    headers = _auth_header(app, user_id)
+
+    first_response = client.post("/listings", json=LISTING_PAYLOAD, headers=headers)
+    second_response = client.post("/listings", json=LISTING_PAYLOAD, headers=headers)
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 402
+    with app.app_context():
+        subscription = EmployerSubscription.query.filter_by(user_id=user_id).one()
+        assert subscription.listing_credits == 0
+        assert Listing.query.count() == 1
+
+
 def test_listing_creation_allows_active_subscription(app, client):
     """Employers with an active subscription can post without consuming credits."""
 

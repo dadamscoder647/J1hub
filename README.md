@@ -14,8 +14,8 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt -r requirements-dev.txt
 
 export APP_ENV=development
-export SECRET_KEY='local-only-secret'
-export JWT_SECRET_KEY='local-only-jwt-secret'
+export SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export DATABASE_URL='sqlite:///app.db'
 export UPLOAD_DIR='workspace/uploads'
 export ORIGINS='http://localhost:5173'
@@ -60,7 +60,7 @@ Verification review and listing search are paginated. A pending queue response h
 
 Verification uploads are stored beneath `UPLOAD_DIR`. The API enforces a size limit, permitted extension and MIME pairs, content signatures for PDF/PNG/JPEG, and path containment. `ALLOWED_UPLOAD_TYPES` can further restrict the MIME values in the built-in extension map.
 
-Outside test, debug, and development mode, startup rejects missing or placeholder Flask/JWT signing keys. If Stripe is enabled, `STRIPE_WEBHOOK_SECRET` is required. Checkout also needs valid `PRICE_LISTING`, `PRICE_MONTHLY`, `BILLING_SUCCESS_URL`, and `BILLING_CANCEL_URL` values. The success/cancel URLs should point to `/billing/success` and `/billing/cancel` on the frontend.
+Outside tests and the explicitly selected `DevelopmentConfig`, startup requires distinct Flask/JWT signing keys that are at least 32 characters and rejects checked-in example placeholders. `APP_ENV=development` and debug mode do not bypass that check. Generate separate random keys for local work; never reuse them in production. If Stripe is enabled, `STRIPE_WEBHOOK_SECRET` is required. Checkout also needs valid `PRICE_LISTING`, `PRICE_MONTHLY`, `BILLING_SUCCESS_URL`, and `BILLING_CANCEL_URL` values. The success/cancel URLs should point to `/billing/success` and `/billing/cancel` on the frontend.
 
 For local Stripe testing, use test-mode Stripe credentials and the webhook signing secret from the local Stripe CLI. The webhook validates the signature and records event IDs so a retry does not grant credits twice. No live Stripe action is part of local setup or CI.
 

@@ -61,6 +61,20 @@ def test_rate_limit_exceeded_returns_json(tmp_path):
     assert "request_id" in payload
 
 
+def test_rate_limit_prefix_is_stable_outside_tests(tmp_path):
+    strong_keys = {
+        "APP_ENV": "production",
+        "TESTING": False,
+        "SECRET_KEY": "prod-secret-with-more-than-thirty-two-characters",
+        "JWT_SECRET_KEY": "jwt-secret-with-more-than-thirty-two-characters",
+    }
+    first_app = _build_app(tmp_path, **strong_keys)
+    second_app = _build_app(tmp_path, **strong_keys)
+
+    assert first_app.config["RATELIMIT_KEY_PREFIX"] == "j1hub:"
+    assert second_app.config["RATELIMIT_KEY_PREFIX"] == "j1hub:"
+
+
 def test_json_error_shape_for_invalid_request(tmp_path):
     app = _build_app(tmp_path)
     client = app.test_client()
@@ -102,14 +116,50 @@ def test_production_requires_secret_keys(tmp_path):
         )
 
 
+def test_development_environment_label_does_not_allow_example_secrets(tmp_path):
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY"):
+        _build_app(
+            tmp_path,
+            APP_ENV="development",
+            TESTING=False,
+            DEBUG=False,
+            SECRET_KEY="replace-with-long-random-secret",
+            JWT_SECRET_KEY="replace-with-long-random-jwt-secret",
+        )
+
+
+def test_production_rejects_identical_signing_keys(tmp_path):
+    shared_key = "shared-signing-key-with-more-than-32-characters"
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY"):
+        _build_app(
+            tmp_path,
+            APP_ENV="production",
+            TESTING=False,
+            SECRET_KEY=shared_key,
+            JWT_SECRET_KEY=shared_key,
+        )
+
+
+def test_debug_flag_does_not_allow_short_signing_keys(tmp_path):
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        _build_app(
+            tmp_path,
+            APP_ENV="development",
+            TESTING=False,
+            DEBUG=True,
+            SECRET_KEY="short-secret",
+            JWT_SECRET_KEY="short-jwt-secret",
+        )
+
+
 def test_production_requires_stripe_webhook_when_stripe_enabled(tmp_path):
     with pytest.raises(RuntimeError, match="STRIPE_WEBHOOK_SECRET"):
         _build_app(
             tmp_path,
             APP_ENV="production",
             TESTING=False,
-            SECRET_KEY="prod-secret",
-            JWT_SECRET_KEY="prod-jwt-secret",
+            SECRET_KEY="prod-secret-with-at-least-32-random-characters",
+            JWT_SECRET_KEY="prod-jwt-secret-with-at-least-32-random-characters",
             STRIPE_SECRET_KEY="sk_live_value",
             STRIPE_WEBHOOK_SECRET=None,
         )

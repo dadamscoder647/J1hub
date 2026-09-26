@@ -141,7 +141,7 @@ except ImportError:
 Limiter = _Limiter
 from werkzeug.exceptions import HTTPException, TooManyRequests
 
-from config import Config
+from config import Config, DevelopmentConfig
 from models import db
 from models.user import User
 from routes.auth import auth_bp
@@ -159,28 +159,38 @@ migrate = Migrate()
 jwt = JWTManager()
 limiter = Limiter(key_func=get_remote_address)
 
-def _enforce_required_production_env(app: Flask) -> None:
-    """Fail fast when a production app has missing or insecure security settings."""
+def _enforce_required_production_env(
+    app: Flask, *, allow_local_development: bool = False
+) -> None:
+    """Fail fast unless a non-test app has strong signing keys configured."""
 
-    env_name = (
-        os.getenv("APP_ENV")
-        or os.getenv("FLASK_ENV")
-        or app.config.get("APP_ENV")
-        or app.config.get("FLASK_ENV")
-        or app.config.get("ENV")
-        or "production"
-    ).lower()
-
-    if app.config.get("TESTING") or app.config.get("DEBUG") or env_name == "development":
+    if app.config.get("TESTING") or allow_local_development:
         return
 
-    insecure_values = {"", "change-me", "changeme", "default", "placeholder"}
+    insecure_values = {
+        "",
+        "change-me",
+        "changeme",
+        "default",
+        "placeholder",
+        "replace-with-long-random-secret",
+        "replace-with-long-random-jwt-secret",
+        "local-only-secret",
+        "local-only-jwt-secret",
+        "dev-secret-key",
+        "dev-jwt-secret-key",
+    }
     missing: list[str] = []
 
     for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
-        value = app.config.get(key)
-        if not value or str(value).strip().lower() in insecure_values:
+        value = str(app.config.get(key) or "").strip()
+        if len(value) < 32 or value.lower() in insecure_values:
             missing.append(key)
+
+    secret_key = str(app.config.get("SECRET_KEY") or "").strip()
+    jwt_secret_key = str(app.config.get("JWT_SECRET_KEY") or "").strip()
+    if secret_key and secret_key == jwt_secret_key:
+        missing.extend(("SECRET_KEY", "JWT_SECRET_KEY"))
 
     stripe_key = app.config.get("STRIPE_SECRET_KEY")
     stripe_webhook = app.config.get("STRIPE_WEBHOOK_SECRET")
@@ -199,7 +209,9 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config.from_object(config_class)
-    _enforce_required_production_env(app)
+    _enforce_required_production_env(
+        app, allow_local_development=issubclass(config_class, DevelopmentConfig)
+    )
 
     # Core subsystems
     db.init_app(app)
@@ -238,7 +250,9 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     # Rate limiting
     storage_uri = app.config.get("RATELIMIT_STORAGE_URI", "memory://")
     headers_enabled = app.config.get("RATELIMIT_HEADERS_ENABLED", True)
-    key_prefix = app.config.get("RATELIMIT_KEY_PREFIX") or str(uuid.uuid4())
+    key_prefix = app.config.get("RATELIMIT_KEY_PREFIX") or (
+        str(uuid.uuid4()) if app.config.get("TESTING") else "j1hub:"
+    )
 
     global limiter
     limiter = Limiter(

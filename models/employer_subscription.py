@@ -29,4 +29,4 @@ class EmployerSubscription(db.Model):
         if self.active_until is None:
             return False
         now = now or datetime.now(UTC).replace(tzinfo=None)
-        return self.active_until >= now
+        return self.active_until > now
