@@ -150,6 +150,61 @@ def test_webhook_does_not_apply_a_duplicate_event_twice(app, client, monkeypatch
         assert len(history) == 1
 
 
+def test_distinct_paid_listing_events_accumulate_credits(app, client, monkeypatch):
+    """Separate successful purchases add to the balance instead of replacing it."""
+
+    with app.app_context():
+        user_id = _create_user(email="separate-purchases@example.com")
+
+    events = [
+        {
+            "id": "evt_listing_first_purchase",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "payment_status": "paid",
+                    "metadata": {
+                        "user_id": str(user_id),
+                        "billing_type": "listing",
+                        "quantity": "3",
+                    },
+                }
+            },
+        },
+        {
+            "id": "evt_listing_second_purchase",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "payment_status": "paid",
+                    "metadata": {
+                        "user_id": str(user_id),
+                        "billing_type": "listing",
+                        "quantity": "2",
+                    },
+                }
+            },
+        },
+    ]
+    event_iter = iter(events)
+    monkeypatch.setattr(
+        stripe.Webhook,
+        "construct_event",
+        staticmethod(lambda *args: next(event_iter)),
+    )
+    _stub_stripe_client(monkeypatch)
+
+    for _ in events:
+        response = client.post(
+            "/billing/webhook", data=b"{}", headers={"Stripe-Signature": "sig"}
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        subscription = EmployerSubscription.query.filter_by(user_id=user_id).one()
+        assert subscription.listing_credits == 5
+
+
 def test_unpaid_checkout_does_not_activate_subscription(app, client, monkeypatch):
     """A completed but unpaid checkout must not start subscription access."""
 

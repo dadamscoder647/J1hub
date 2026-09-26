@@ -46,8 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SECRET_KEY: ci-secret-only-test-key-for-j1hub-unit-workflows
-      JWT_SECRET_KEY: ci-jwt-secret-only-test-key-for-j1hub-workflows
       DATABASE_URL: sqlite:///test.db
       UPLOAD_DIR: workspace/uploads
     steps:
@@ -105,8 +103,6 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      SECRET_KEY: ci-secret-only-test-key-for-j1hub-migration-workflows
-      JWT_SECRET_KEY: ci-jwt-secret-only-test-key-for-j1hub-migrations
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/appdb
       UPLOAD_DIR: workspace/uploads
       FLASK_APP: app:create_app
@@ -120,6 +116,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
           pip install psycopg2-binary
+      - name: Generate ephemeral signing keys
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          import secrets
+          print(f"SECRET_KEY={secrets.token_urlsafe(48)}")
+          print(f"JWT_SECRET_KEY={secrets.token_urlsafe(48)}")
+          PY
       - name: Verify clean database upgrade and schema
         run: |
           mkdir -p workspace/uploads

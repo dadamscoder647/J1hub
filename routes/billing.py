@@ -8,6 +8,7 @@ from typing import Any
 import stripe
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
+from sqlalchemy import update
 from stripe import StripeClient
 
 from models import db
@@ -280,7 +281,17 @@ def _handle_listing_purchase(metadata: dict, event_id: str | None) -> None:
     quantity = max(quantity, 1)
 
     subscription = _get_or_create_subscription(user_id_int)
-    subscription.listing_credits = (subscription.listing_credits or 0) + quantity
+    db.session.flush()
+    db.session.execute(
+        update(EmployerSubscription)
+        .where(EmployerSubscription.id == subscription.id)
+        .values(
+            listing_credits=EmployerSubscription.listing_credits + quantity,
+            updated_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    db.session.refresh(subscription, attribute_names=["listing_credits"])
     create_notification(
         user_id=user_id_int,
         event_type="billing_credit_change",

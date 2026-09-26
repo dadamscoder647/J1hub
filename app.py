@@ -167,6 +167,11 @@ def _enforce_required_production_env(
     if app.config.get("TESTING") or allow_local_development:
         return
 
+    if app.config.get("DEBUG"):
+        raise RuntimeError(
+            "DEBUG must be false outside tests and the explicit DevelopmentConfig."
+        )
+
     insecure_values = {
         "",
         "change-me",
@@ -179,6 +184,12 @@ def _enforce_required_production_env(
         "local-only-jwt-secret",
         "dev-secret-key",
         "dev-jwt-secret-key",
+        "ci-secret-only-test-key-for-j1hub-unit-workflows",
+        "ci-jwt-secret-only-test-key-for-j1hub-workflows",
+        "ci-secret-only-test-key-for-j1hub-migration-workflows",
+        "ci-jwt-secret-only-test-key-for-j1hub-migrations",
+        "test-secret-key-for-j1hub-tests-2026",
+        "test-jwt-secret-key-for-j1hub-tests-2026",
     }
     missing: list[str] = []
 

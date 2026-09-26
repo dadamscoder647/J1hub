@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import sys
 from pathlib import Path
 
@@ -32,6 +33,13 @@ def _build_app(tmp_path: Path, **overrides) -> Flask:
         setattr(TestConfig, key, value)
 
     return create_app(TestConfig)
+
+
+def _valid_production_signing_keys() -> dict[str, str]:
+    return {
+        "SECRET_KEY": secrets.token_urlsafe(32),
+        "JWT_SECRET_KEY": secrets.token_urlsafe(32),
+    }
 
 
 def test_cors_allows_configured_origin(tmp_path):
@@ -65,8 +73,7 @@ def test_rate_limit_prefix_is_stable_outside_tests(tmp_path):
     strong_keys = {
         "APP_ENV": "production",
         "TESTING": False,
-        "SECRET_KEY": "prod-secret-with-more-than-thirty-two-characters",
-        "JWT_SECRET_KEY": "jwt-secret-with-more-than-thirty-two-characters",
+        **_valid_production_signing_keys(),
     }
     first_app = _build_app(tmp_path, **strong_keys)
     second_app = _build_app(tmp_path, **strong_keys)
@@ -140,15 +147,52 @@ def test_production_rejects_identical_signing_keys(tmp_path):
         )
 
 
-def test_debug_flag_does_not_allow_short_signing_keys(tmp_path):
+@pytest.mark.parametrize(
+    "checked_in_key",
+    [
+        "ci-secret-only-test-key-for-j1hub-unit-workflows",
+        "ci-jwt-secret-only-test-key-for-j1hub-workflows",
+        "ci-secret-only-test-key-for-j1hub-migration-workflows",
+        "ci-jwt-secret-only-test-key-for-j1hub-migrations",
+        "test-secret-key-for-j1hub-tests-2026",
+        "test-jwt-secret-key-for-j1hub-tests-2026",
+    ],
+)
+@pytest.mark.parametrize("key_name", ["SECRET_KEY", "JWT_SECRET_KEY"])
+def test_production_rejects_checked_in_test_and_ci_signing_keys(
+    tmp_path, checked_in_key, key_name
+):
+    settings = {
+        "APP_ENV": "production",
+        "TESTING": False,
+        **_valid_production_signing_keys(),
+    }
+    settings[key_name] = checked_in_key
+
+    with pytest.raises(RuntimeError, match=key_name):
+        _build_app(tmp_path, **settings)
+
+
+def test_production_rejects_case_and_whitespace_variants_of_checked_in_keys(tmp_path):
+    settings = {
+        "APP_ENV": "production",
+        "TESTING": False,
+        **_valid_production_signing_keys(),
+    }
+    settings["SECRET_KEY"] = "  TEST-SECRET-KEY-FOR-J1HUB-TESTS-2026  "
+
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        _build_app(tmp_path, **settings)
+
+
+def test_debug_flag_is_rejected_outside_explicit_development_config(tmp_path):
+    with pytest.raises(RuntimeError, match="DEBUG must be false"):
         _build_app(
             tmp_path,
-            APP_ENV="development",
+            APP_ENV="production",
             TESTING=False,
             DEBUG=True,
-            SECRET_KEY="short-secret",
-            JWT_SECRET_KEY="short-jwt-secret",
+            **_valid_production_signing_keys(),
         )
 
 
@@ -158,8 +202,7 @@ def test_production_requires_stripe_webhook_when_stripe_enabled(tmp_path):
             tmp_path,
             APP_ENV="production",
             TESTING=False,
-            SECRET_KEY="prod-secret-with-at-least-32-random-characters",
-            JWT_SECRET_KEY="prod-jwt-secret-with-at-least-32-random-characters",
+            **_valid_production_signing_keys(),
             STRIPE_SECRET_KEY="sk_live_value",
             STRIPE_WEBHOOK_SECRET=None,
         )
