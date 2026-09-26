@@ -105,14 +105,19 @@ def downgrade() -> None:
         ),
     )
 
+    enum_cast = (
+        f"::{VERIFICATION_STATUS_ENUM}"
+        if op.get_bind().dialect.name == "postgresql"
+        else ""
+    )
     op.execute(
-        """
+        f"""
         UPDATE users
         SET verification_status_old = CASE
             WHEN verification_status IN ('unverified', 'pending', 'approved', 'rejected')
                 THEN verification_status
             ELSE 'unverified'
-        END
+        END{enum_cast}
         """
     )
 
