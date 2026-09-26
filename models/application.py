@@ -9,11 +9,19 @@ class Application(db.Model):
     """Represents a worker application for a listing."""
 
     __tablename__ = "applications"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "listing_id",
+            name="uq_applications_user_id_listing_id",
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     listing_id = db.Column(db.Integer, db.ForeignKey("listings.id"), nullable=False)
     message = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(32), nullable=False, default="new")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     applicant = db.relationship(
@@ -31,5 +39,6 @@ class Application(db.Model):
             "user_id": self.user_id,
             "listing_id": self.listing_id,
             "message": self.message,
+            "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

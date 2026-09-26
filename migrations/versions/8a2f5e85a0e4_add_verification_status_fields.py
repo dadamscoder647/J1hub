@@ -1,8 +1,7 @@
 """Add verification status tracking to users and visa documents."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "8a2f5e85a0e4"
@@ -36,9 +35,15 @@ def upgrade() -> None:
         ),
     )
     op.execute(
-        "UPDATE users SET verification_status='approved' WHERE is_verified = 1"
+        "UPDATE users SET verification_status='approved' WHERE is_verified IS TRUE"
     )
-    op.alter_column("users", "verification_status", server_default=None)
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.alter_column(
+            "verification_status",
+            existing_type=verification_status,
+            existing_nullable=False,
+            server_default=None,
+        )
 
     op.add_column(
         "visa_documents",
@@ -50,13 +55,15 @@ def upgrade() -> None:
         ),
     )
     op.execute(
-        "UPDATE visa_documents SET waiver_acknowledged=0 WHERE waiver_acknowledged IS NULL"
+        "UPDATE visa_documents SET waiver_acknowledged=FALSE WHERE waiver_acknowledged IS NULL"
     )
-    op.alter_column(
-        "visa_documents",
-        "waiver_acknowledged",
-        server_default=None,
-    )
+    with op.batch_alter_table("visa_documents") as batch_op:
+        batch_op.alter_column(
+            "waiver_acknowledged",
+            existing_type=sa.Boolean(),
+            existing_nullable=False,
+            server_default=None,
+        )
 
 
 def downgrade() -> None:

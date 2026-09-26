@@ -1,2 +1,6 @@
 pytest
 pytest-cov
+jsonschema
+pre-commit
+ruff
+mypy

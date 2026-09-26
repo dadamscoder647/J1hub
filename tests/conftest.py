@@ -13,9 +13,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app import create_app  # noqa: E402
-from config import Config  # noqa: E402
-from models import db  # noqa: E402
+from app import create_app
+from config import Config
+from models import db
 
 
 class _BaseTestConfig(Config):

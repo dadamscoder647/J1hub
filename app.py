@@ -5,16 +5,19 @@ import os
 import time
 import uuid
 
-from flask import Flask, jsonify, g, request
+from flask import Flask, g, jsonify, request
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
 
 try:
     from flask_cors import CORS as _CORS
-except Exception:
-    def _CORS(app, resources=None, supports_credentials=False, **kwargs):  # no-op if lib missing
+except ImportError:
+
+    def _CORS(
+        app, resources=None, supports_credentials=False, **kwargs
+    ):  # no-op if lib missing
         if app is None:
-            return None
+            return
 
         origins = "*"
         if isinstance(resources, dict):
@@ -45,15 +48,17 @@ except Exception:
                 response.headers.setdefault("Access-Control-Allow-Credentials", "true")
             return response
 
-        return None
+        return
+
 
 CORS = _CORS
 
 try:
     from flask_limiter import Limiter as _Limiter
     from flask_limiter.util import get_remote_address
-except Exception:
-    class _Limiter:
+except ImportError:
+
+    class _Limiter:  # type: ignore[no-redef]
         def __init__(
             self,
             key_func=None,
@@ -132,35 +137,96 @@ except Exception:
     def get_remote_address():
         return "127.0.0.1"
 
+
 Limiter = _Limiter
 from werkzeug.exceptions import HTTPException, TooManyRequests
 
 from config import Config
 from models import db
+from models.user import User
 from routes.auth import auth_bp
 from routes.listings import listings_bp
+from routes.notifications import notifications_bp
 from routes.verify import verify_bp
 
 # Billing routes may be optional; import safely
 try:
     from routes.billing import billing_bp  # type: ignore
-except Exception:
+except ImportError:
     billing_bp = None  # register only if present
 
 migrate = Migrate()
 jwt = JWTManager()
 limiter = Limiter(key_func=get_remote_address)
 
+def _enforce_required_production_env(app: Flask) -> None:
+    """Fail fast when a production app has missing or insecure security settings."""
+
+    env_name = (
+        os.getenv("APP_ENV")
+        or os.getenv("FLASK_ENV")
+        or app.config.get("APP_ENV")
+        or app.config.get("FLASK_ENV")
+        or app.config.get("ENV")
+        or "production"
+    ).lower()
+
+    if app.config.get("TESTING") or app.config.get("DEBUG") or env_name == "development":
+        return
+
+    insecure_values = {"", "change-me", "changeme", "default", "placeholder"}
+    missing: list[str] = []
+
+    for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
+        value = app.config.get(key)
+        if not value or str(value).strip().lower() in insecure_values:
+            missing.append(key)
+
+    stripe_key = app.config.get("STRIPE_SECRET_KEY")
+    stripe_webhook = app.config.get("STRIPE_WEBHOOK_SECRET")
+    if stripe_key and not stripe_webhook:
+        missing.append("STRIPE_WEBHOOK_SECRET")
+
+    if missing:
+        joined = ", ".join(sorted(set(missing)))
+        raise RuntimeError(
+            "Missing required security configuration: "
+            f"{joined}. Refusing to start until secure values are configured."
+        )
+
 
 def create_app(config_class: type[Config] = Config) -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config.from_object(config_class)
+    _enforce_required_production_env(app)
 
     # Core subsystems
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+
+    @jwt.token_in_blocklist_loader
+    def user_is_inactive(_jwt_header, jwt_payload):
+        identity = jwt_payload.get("sub")
+        try:
+            user_id = int(identity)
+        except (TypeError, ValueError):
+            return True
+        user = User.query.get(user_id)
+        return user is None or not user.is_active
+
+    @jwt.revoked_token_loader
+    def inactive_user_token(_jwt_header, _jwt_payload):
+        response = jsonify(
+            {
+                "error": "Unauthorized",
+                "detail": "User account is inactive or no longer available.",
+                "request_id": g.get("request_id") or str(uuid.uuid4()),
+            }
+        )
+        response.status_code = 401
+        return response
 
     # CORS
     CORS(
@@ -191,16 +257,35 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         os.makedirs(upload_dir, exist_ok=True)
 
     # Blueprints
-    app.register_blueprint(verify_bp, url_prefix="/verify")
-    app.register_blueprint(listings_bp, url_prefix="/listings")
+    app.register_blueprint(verify_bp, url_prefix="/api/v1/verify")
+    app.register_blueprint(listings_bp, url_prefix="/api/v1/listings")
     if billing_bp:  # only if billing module exists
-        app.register_blueprint(billing_bp, url_prefix="/billing")
-    app.register_blueprint(auth_bp, url_prefix="/auth")
+        app.register_blueprint(billing_bp, url_prefix="/api/v1/billing")
+    app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
+    app.register_blueprint(notifications_bp, url_prefix="/api/v1/notifications")
+
+    # Backward-compatible legacy routes can be disabled after migration.
+    if app.config.get("API_ENABLE_LEGACY_ROUTES", True):
+        app.register_blueprint(verify_bp, url_prefix="/verify", name="verify_legacy")
+        app.register_blueprint(listings_bp, url_prefix="/listings", name="listings_legacy")
+        if billing_bp:
+            app.register_blueprint(billing_bp, url_prefix="/billing", name="billing_legacy")
+        app.register_blueprint(auth_bp, url_prefix="/auth", name="auth_legacy")
+        app.register_blueprint(
+            notifications_bp, url_prefix="/notifications", name="notifications_legacy"
+        )
 
     # Health
-    @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify({"status": "ok"})
+
+    app.add_url_rule(
+        "/api/v1/health", view_func=health_check, methods=["GET"], endpoint="health_v1"
+    )
+    if app.config.get("API_ENABLE_LEGACY_ROUTES", True):
+        app.add_url_rule(
+            "/health", view_func=health_check, methods=["GET"], endpoint="health_legacy"
+        )
 
     # Errors
     _register_error_handlers(app)
@@ -253,4 +338,4 @@ def _register_error_handlers(app: Flask) -> None:
 
 if __name__ == "__main__":
     application = create_app()
-    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))

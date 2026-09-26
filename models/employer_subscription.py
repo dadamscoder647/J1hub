@@ -1,6 +1,6 @@
 """Employer subscription model for billing."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from . import db
 
@@ -12,7 +12,7 @@ class EmployerSubscription(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(
-        db.Integer, db.ForeignKey("users.id"), nullable=False, unique=True
+        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     active_until = db.Column(db.DateTime, nullable=True)
     listing_credits = db.Column(db.Integer, nullable=False, default=0)
@@ -28,5 +28,5 @@ class EmployerSubscription(db.Model):
 
         if self.active_until is None:
             return False
-        now = now or datetime.utcnow()
+        now = now or datetime.now(UTC).replace(tzinfo=None)
         return self.active_until >= now

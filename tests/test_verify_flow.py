@@ -17,15 +17,19 @@ def _register_and_login(
 ) -> tuple[int, str]:
     """Register a user and return their ID along with an access token."""
 
-    register_payload = {"email": email, "password": password}
-    if role != "worker":
-        register_payload["role"] = role
-
-    register_response = client.post("/auth/register", json=register_payload)
-    assert register_response.status_code in {200, 201}
+    if role == "admin":
+        with app.app_context():
+            user = User(email=email, role="admin", is_verified=True)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+    else:
+        register_payload = {"email": email, "password": password, "role": role}
+        register_response = client.post("/api/v1/auth/register", json=register_payload)
+        assert register_response.status_code == 201
 
     login_response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={"email": email, "password": password},
     )
     assert login_response.status_code == 200
@@ -64,7 +68,7 @@ def test_upload_and_status(app: Flask, client):
     upload_response = client.post(
         "/verify/upload",
         data={
-            "document": (BytesIO(b"PDF data"), "document.pdf"),
+            "document": (BytesIO(b"%PDF-1.7\n"), "document.pdf"),
             "waiver": "true",
         },
         headers=headers,
@@ -114,7 +118,9 @@ def test_admin_approve(app: Flask, client):
         document_id = document.id
         worker_id = worker.id
 
-    response = client.post(f"/verify/{document_id}/approve", headers=headers)
+    response = client.post(
+        f"/api/v1/admin/verify/{document_id}/approve", headers=headers
+    )
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "approved"
@@ -158,7 +164,7 @@ def test_admin_reject_with_note(app: Flask, client):
         worker_id = worker.id
 
     response = client.post(
-        f"/verify/{document_id}/reject",
+        f"/api/v1/admin/verify/{document_id}/reject",
         json={"review_note": "Missing page 2"},
         headers=headers,
     )

@@ -1,6 +1,6 @@
 """Listing model."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import and_, or_
@@ -66,7 +66,7 @@ class Listing(db.Model):
     def active_filter(query):
         """Filter a SQLAlchemy query for active listings."""
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         return query.filter(
             and_(
                 Listing.is_active.is_(True),

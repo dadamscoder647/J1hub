@@ -4,7 +4,6 @@ from datetime import datetime
 
 from . import db
 
-
 VISA_DOCUMENT_STATUSES = ("pending", "approved", "rejected")
 
 

@@ -1,6 +1,6 @@
 """Seed demo users, listings, and applications."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app import create_app
@@ -8,6 +8,13 @@ from models import db
 from models.application import Application
 from models.listing import Listing
 from models.user import User
+from scripts.seed_credentials import (
+    DEFAULT_EMPLOYER_EMAIL,
+    DEFAULT_EMPLOYER_PASSWORD,
+    DEFAULT_WORKER_EMAIL,
+    DEFAULT_WORKER_PASSWORD,
+    get_seed_env_value,
+)
 
 
 def get_or_create_user(
@@ -37,13 +44,26 @@ def get_or_create_user(
 
 
 def main() -> None:
+    employer_email = get_seed_env_value(
+        "seed_demo_data", "SEED_EMPLOYER_EMAIL", DEFAULT_EMPLOYER_EMAIL
+    )
+    employer_password = get_seed_env_value(
+        "seed_demo_data", "SEED_EMPLOYER_PASSWORD", DEFAULT_EMPLOYER_PASSWORD
+    )
+    worker_email = get_seed_env_value(
+        "seed_demo_data", "SEED_WORKER_EMAIL", DEFAULT_WORKER_EMAIL
+    )
+    worker_password = get_seed_env_value(
+        "seed_demo_data", "SEED_WORKER_PASSWORD", DEFAULT_WORKER_PASSWORD
+    )
+
     app = create_app()
     with app.app_context():
         employer = get_or_create_user(
-            "employer@example.com", "employer", "EmployerPass123", is_verified=True
+            employer_email, "employer", employer_password, is_verified=True
         )
         worker = get_or_create_user(
-            "worker@example.com", "worker", "WorkerPass123", is_verified=True
+            worker_email, "worker", worker_password, is_verified=True
         )
 
         db.session.flush()
@@ -62,7 +82,7 @@ def main() -> None:
                 "shift": "Day",
                 "is_public": True,
                 "is_active": True,
-                "expires_at": datetime.utcnow() + timedelta(days=60),
+                "expires_at": datetime.now(UTC).replace(tzinfo=None) + timedelta(days=60),
             },
             {
                 "category": "housing",
@@ -77,7 +97,7 @@ def main() -> None:
                 "shift": None,
                 "is_public": True,
                 "is_active": True,
-                "expires_at": datetime.utcnow() + timedelta(days=45),
+                "expires_at": datetime.now(UTC).replace(tzinfo=None) + timedelta(days=45),
             },
             {
                 "category": "ride",
@@ -92,7 +112,7 @@ def main() -> None:
                 "shift": "Evening",
                 "is_public": False,
                 "is_active": True,
-                "expires_at": datetime.utcnow() + timedelta(days=14),
+                "expires_at": datetime.now(UTC).replace(tzinfo=None) + timedelta(days=14),
             },
         ]
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from math import ceil
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
@@ -12,24 +13,29 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 from sqlalchemy import and_, or_
-from werkzeug.exceptions import BadRequest, Forbidden
+from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 from models import db
 from models.application import Application
 from models.employer_subscription import EmployerSubscription
 from models.listing import CONTACT_METHODS, LISTING_CATEGORIES, Listing
+from models.saved_listing import SavedListing
 from models.user import User
+from services.notification_service import create_notification
 from utils.request_validation import parse_json_request
 
 listings_bp = Blueprint("listings", __name__)
+APPLICATION_STATUSES = {"new", "reviewing", "accepted", "rejected"}
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 100
 
 
 def _get_current_user(optional: bool = False) -> User | None:
     if optional:
-        try:
-            verify_jwt_in_request(optional=True)
-        except Exception:  # pragma: no cover - defensive
-            return None
+        verify_jwt_in_request(optional=True)
     else:
         verify_jwt_in_request()
 
@@ -75,6 +81,24 @@ def _parse_bool(value):
     return None
 
 
+def _parse_pagination_params() -> tuple[int, int]:
+    page_raw = request.args.get("page", str(DEFAULT_PAGE))
+    per_page_raw = request.args.get("per_page", str(DEFAULT_PER_PAGE))
+
+    try:
+        page = int(page_raw)
+        per_page = int(per_page_raw)
+    except (TypeError, ValueError):
+        raise BadRequest("page and per_page must be integers.") from None
+
+    if page < 1:
+        raise BadRequest("page must be greater than 0.")
+    if per_page < 1:
+        raise BadRequest("per_page must be greater than 0.")
+
+    return page, min(per_page, MAX_PER_PAGE)
+
+
 @listings_bp.route("", methods=["GET"])
 def search_listings():
     """Return listings with optional filters."""
@@ -111,7 +135,7 @@ def search_listings():
     if active is True:
         query = Listing.active_filter(query)
     elif active is False:
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         query = query.filter(
             or_(
                 Listing.is_active.is_(False),
@@ -119,15 +143,43 @@ def search_listings():
             )
         )
 
-    listings = query.order_by(Listing.created_at.desc()).all()
+    page, per_page = _parse_pagination_params()
 
-    payload = []
-    for listing in listings:
-        if not _can_view_listing(listing, user):
-            continue
-        payload.append(listing.to_dict(include_contact=_can_view_contact(listing, user)))
+    if user is None:
+        query = query.filter(Listing.is_public.is_(True))
+    elif user.role != "admin" and not user.is_verified:
+        query = query.filter(
+            or_(Listing.is_public.is_(True), Listing.created_by == user.id)
+        )
 
-    return jsonify({"results": payload, "count": len(payload)})
+    start = (page - 1) * per_page
+    total = query.count()
+    listings = (
+        query.order_by(Listing.created_at.desc(), Listing.id.desc())
+        .offset(start)
+        .limit(per_page)
+        .all()
+    )
+    page_results = [
+        listing.to_dict(include_contact=_can_view_contact(listing, user))
+        for listing in listings
+    ]
+    total_pages = ceil(total / per_page) if total else 0
+
+    return jsonify(
+        {
+            "results": page_results,
+            "count": len(page_results),
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+            },
+        }
+    )
 
 
 def _validate_listing_payload(data: dict, partial: bool = False):
@@ -183,7 +235,7 @@ def create_listing():
     subscription = None
     if user.role != "admin":
         subscription = EmployerSubscription.query.filter_by(user_id=user.id).first()
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         has_active_subscription = bool(
             subscription and subscription.has_active_subscription(now)
         )
@@ -228,6 +280,24 @@ def create_listing():
     db.session.commit()
 
     return jsonify(listing.to_dict(include_contact=True)), 201
+
+
+@listings_bp.route("/mine", methods=["GET"])
+@jwt_required()
+def my_listings():
+    """Return listings owned by the authenticated employer."""
+
+    user = _get_current_user()
+    if user is None or user.role not in {"employer", "admin"}:
+        raise Forbidden("Only employers or admins can view their listings.")
+
+    listings = (
+        Listing.query.filter_by(created_by=user.id)
+        .order_by(Listing.created_at.desc(), Listing.id.desc())
+        .all()
+    )
+    results = [listing.to_dict(include_contact=True) for listing in listings]
+    return jsonify({"results": results, "count": len(results)})
 
 
 @listings_bp.route("/<int:listing_id>", methods=["GET"])
@@ -305,19 +375,159 @@ def apply_to_listing(listing_id: int):
     if user is None or user.role != "worker":
         raise Forbidden("Only workers can apply to listings.")
 
-    if not _can_view_listing(listing, user):
-        raise Forbidden("You must be verified to apply to this listing.")
+    if not user.is_verified:
+        raise Forbidden("Verification approval is required to apply to listings.")
 
-    if not listing.is_active:
-        raise BadRequest("Listing is not active.")
+    if not Listing.active_filter(Listing.query.filter_by(id=listing.id)).first():
+        raise BadRequest("Listing is not active or has expired.")
 
     data = parse_json_request(request)
     message = data.get("message")
     if not message:
         raise BadRequest("message is required")
 
-    application = Application(user_id=user.id, listing_id=listing.id, message=message)
+    existing_application = Application.query.filter_by(
+        user_id=user.id,
+        listing_id=listing.id,
+    ).first()
+    if existing_application is not None:
+        return jsonify({"error": "You have already applied to this listing."}), 409
+
+    application = Application(
+        user_id=user.id, listing_id=listing.id, message=message, status="new"
+    )
     db.session.add(application)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "You have already applied to this listing."}), 409
 
     return jsonify(application.to_dict()), 201
+
+
+@listings_bp.route("/favorites", methods=["GET"])
+@jwt_required()
+def list_favorites():
+    """List saved listings for the worker."""
+
+    user = _get_current_user()
+    if user is None or user.role != "worker":
+        raise Forbidden("Only workers can view favorites.")
+
+    favorites = SavedListing.query.filter_by(user_id=user.id).all()
+    listing_ids = [item.listing_id for item in favorites]
+    if not listing_ids:
+        return jsonify({"results": [], "count": 0})
+
+    listings = Listing.query.filter(Listing.id.in_(listing_ids)).all()
+    by_id = {listing.id: listing for listing in listings}
+    results = [
+        {
+            **favorite.to_dict(),
+            "listing": by_id[favorite.listing_id].to_dict(include_contact=_can_view_contact(by_id[favorite.listing_id], user)),
+        }
+        for favorite in favorites
+        if favorite.listing_id in by_id and _can_view_listing(by_id[favorite.listing_id], user)
+    ]
+    return jsonify({"results": results, "count": len(results)})
+
+
+@listings_bp.route("/<int:listing_id>/favorite", methods=["POST"])
+@jwt_required()
+def favorite_listing(listing_id: int):
+    """Save/favorite a listing for the authenticated worker."""
+
+    listing = Listing.query.get_or_404(listing_id)
+    user = _get_current_user()
+    if user is None or user.role != "worker":
+        raise Forbidden("Only workers can favorite listings.")
+
+    if not _can_view_listing(listing, user):
+        raise Forbidden("Not authorized to favorite this listing.")
+
+    existing = SavedListing.query.filter_by(user_id=user.id, listing_id=listing.id).first()
+    if existing:
+        return jsonify(existing.to_dict())
+
+    favorite = SavedListing(user_id=user.id, listing_id=listing.id)
+    db.session.add(favorite)
+    db.session.commit()
+    return jsonify(favorite.to_dict()), 201
+
+
+@listings_bp.route("/<int:listing_id>/favorite", methods=["DELETE"])
+@jwt_required()
+def unfavorite_listing(listing_id: int):
+    """Remove a saved listing for the authenticated worker."""
+
+    user = _get_current_user()
+    if user is None or user.role != "worker":
+        raise Forbidden("Only workers can unfavorite listings.")
+
+    favorite = SavedListing.query.filter_by(user_id=user.id, listing_id=listing_id).first()
+    if favorite is None:
+        raise NotFound("Saved listing not found.")
+
+    db.session.delete(favorite)
+    db.session.commit()
+    return jsonify({"status": "deleted"})
+
+
+@listings_bp.route("/<int:listing_id>/applications", methods=["GET"])
+@jwt_required()
+def list_applications_for_listing(listing_id: int):
+    """Employer endpoint to list applications for a listing."""
+
+    user = _get_current_user()
+    listing = Listing.query.get_or_404(listing_id)
+    if user is None or (user.role != "admin" and listing.created_by != user.id):
+        raise Forbidden("You do not have permission to view listing applications.")
+
+    apps = Application.query.filter_by(listing_id=listing.id).order_by(Application.created_at.desc()).all()
+    return jsonify({"results": [app.to_dict() for app in apps], "count": len(apps)})
+
+
+@listings_bp.route("/applications/mine", methods=["GET"])
+@jwt_required()
+def my_applications():
+    """Worker endpoint to list submitted applications and statuses."""
+
+    user = _get_current_user()
+    if user is None or user.role != "worker":
+        raise Forbidden("Only workers can view their applications.")
+
+    apps = Application.query.filter_by(user_id=user.id).order_by(Application.created_at.desc()).all()
+    return jsonify({"results": [app.to_dict() for app in apps], "count": len(apps)})
+
+
+@listings_bp.route("/<int:listing_id>/applications/<int:application_id>", methods=["PATCH"])
+@jwt_required()
+def update_application_status(listing_id: int, application_id: int):
+    """Employer endpoint to transition application status."""
+
+    user = _get_current_user()
+    listing = Listing.query.get_or_404(listing_id)
+    if user is None or (user.role != "admin" and listing.created_by != user.id):
+        raise Forbidden("You do not have permission to update applications.")
+
+    application = Application.query.get_or_404(application_id)
+    if application.listing_id != listing.id:
+        raise BadRequest("Application does not belong to listing.")
+
+    payload = parse_json_request(request)
+    status = payload.get("status")
+    if status not in APPLICATION_STATUSES:
+        raise BadRequest("status must be one of new, reviewing, accepted, rejected")
+
+    application.status = status
+    create_notification(
+        user_id=application.user_id,
+        event_type="application_update",
+        title="Application status updated",
+        message=f"Your application for '{listing.title}' is now {status}.",
+        metadata={"listing_id": listing.id, "application_id": application.id, "status": status},
+    )
+    db.session.commit()
+
+    return jsonify(application.to_dict())
