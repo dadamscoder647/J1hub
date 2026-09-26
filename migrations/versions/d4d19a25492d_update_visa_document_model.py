@@ -220,6 +220,7 @@ def downgrade():
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute(f"DROP TYPE IF EXISTS {VISA_DOCUMENT_STATUS_NAME}")
+        op.execute(f"DROP TYPE IF EXISTS {OLD_VISA_DOCUMENT_TYPE_NAME}")
 
     visa_document_type = sa.Enum("passport", "j1_visa", name="visa_document_type")
     visa_document_status = sa.Enum(
@@ -228,9 +229,6 @@ def downgrade():
         "denied",
         name=VISA_DOCUMENT_STATUS_NAME,
     )
-    visa_document_type.create(op.get_bind(), checkfirst=True)
-    visa_document_status.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "visa_documents",
         sa.Column("id", sa.Integer(), nullable=False),
