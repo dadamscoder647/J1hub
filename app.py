@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 
+import click
 from flask import Flask, g, jsonify, request
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
@@ -170,6 +171,22 @@ def _enforce_required_production_env(
     if app.config.get("DEBUG"):
         raise RuntimeError(
             "DEBUG must be false outside tests and the explicit DevelopmentConfig."
+        )
+
+    flask_debug = os.environ.get("FLASK_DEBUG")
+    if flask_debug and flask_debug.lower() not in {"0", "false", "no"}:
+        raise RuntimeError(
+            "FLASK_DEBUG must be false outside tests and the explicit DevelopmentConfig."
+        )
+
+    cli_context = click.get_current_context(silent=True)
+    if (
+        cli_context is not None
+        and cli_context.command.name == "run"
+        and cli_context.params.get("debugger")
+    ):
+        raise RuntimeError(
+            "The Flask CLI debugger must be disabled outside tests and the explicit DevelopmentConfig."
         )
 
     insecure_values = {
@@ -363,4 +380,6 @@ def _register_error_handlers(app: Flask) -> None:
 
 if __name__ == "__main__":
     application = create_app()
-    application.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
+    application.run(
+        host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False
+    )

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import runpy
 import secrets
 import sys
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from flask import Flask
+from flask.cli import FlaskGroup
+from werkzeug import serving
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -15,6 +19,11 @@ if str(ROOT_DIR) not in sys.path:
 
 from app import create_app
 from config import Config
+
+
+@pytest.fixture(autouse=True)
+def _clear_flask_debug_environment(monkeypatch):
+    monkeypatch.delenv("FLASK_DEBUG", raising=False)
 
 
 class _SecurityBaseConfig(Config):
@@ -194,6 +203,106 @@ def test_debug_flag_is_rejected_outside_explicit_development_config(tmp_path):
             DEBUG=True,
             **_valid_production_signing_keys(),
         )
+
+
+@pytest.mark.parametrize("flask_debug", ["1", "true", "yes", "off"])
+def test_enabled_flask_debug_is_rejected_outside_explicit_development_config(
+    tmp_path, monkeypatch, flask_debug
+):
+    monkeypatch.setenv("FLASK_DEBUG", flask_debug)
+
+    with pytest.raises(RuntimeError, match="FLASK_DEBUG must be false"):
+        _build_app(
+            tmp_path,
+            APP_ENV="production",
+            TESTING=False,
+            DEBUG=False,
+            **_valid_production_signing_keys(),
+        )
+
+
+@pytest.mark.parametrize("flask_debug", ["0", "false", "no", ""])
+def test_disabled_flask_debug_values_allow_production_startup(
+    tmp_path, monkeypatch, flask_debug
+):
+    monkeypatch.setenv("FLASK_DEBUG", flask_debug)
+
+    app = _build_app(
+        tmp_path,
+        APP_ENV="production",
+        TESTING=False,
+        DEBUG=False,
+        **_valid_production_signing_keys(),
+    )
+
+    assert app.debug is False
+
+
+def test_testing_config_bypasses_flask_debug_production_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+
+    app = _build_app(tmp_path)
+
+    assert app.testing is True
+
+
+def test_direct_entrypoint_disables_debug_after_dotenv_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "SECRET_KEY", secrets.token_urlsafe(32))
+    monkeypatch.setattr(Config, "JWT_SECRET_KEY", secrets.token_urlsafe(32))
+    monkeypatch.setattr(Config, "DEBUG", False)
+    monkeypatch.delenv("FLASK_DEBUG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("FLASK_DEBUG=1\n", encoding="utf-8")
+    run_options = {}
+    monkeypatch.setattr(
+        serving,
+        "run_simple",
+        lambda *_args, **options: run_options.update(options),
+    )
+
+    runpy.run_path(str(ROOT_DIR / "app.py"), run_name="__main__")
+
+    assert run_options["use_debugger"] is False
+    assert run_options["use_reloader"] is False
+
+
+@pytest.mark.parametrize(
+    ("args", "cli_env"),
+    [
+        (["run", "--debugger"], {}),
+        (["run"], {"FLASK_RUN_DEBUGGER": "1"}),
+    ],
+)
+def test_flask_cli_debugger_is_rejected_for_production_app(
+    tmp_path, monkeypatch, args, cli_env
+):
+    from flask import cli as flask_cli
+
+    production_config = type(
+        "ProductionConfig",
+        (Config,),
+        {
+            "APP_ENV": "production",
+            "TESTING": False,
+            "DEBUG": False,
+            "SECRET_KEY": secrets.token_urlsafe(32),
+            "JWT_SECRET_KEY": secrets.token_urlsafe(32),
+            "UPLOAD_DIR": str(tmp_path / "uploads"),
+        },
+    )
+    monkeypatch.setattr(
+        flask_cli,
+        "run_simple",
+        lambda *_args, **_options: pytest.fail("The server must not start."),
+    )
+    cli = FlaskGroup(
+        create_app=lambda: create_app(production_config), load_dotenv=False
+    )
+
+    result = CliRunner().invoke(cli, args, env=cli_env)
+
+    assert isinstance(result.exception, RuntimeError)
+    assert "Flask CLI debugger must be disabled" in str(result.exception)
 
 
 def test_production_requires_stripe_webhook_when_stripe_enabled(tmp_path):

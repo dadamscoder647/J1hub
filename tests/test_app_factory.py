@@ -28,11 +28,13 @@ def test_blueprints_registered(app):
     # billing is optional; do not require it for tests
 
 
-def test_startup_validation_raises_when_keys_missing(tmp_path):
+def test_startup_validation_raises_when_keys_missing(tmp_path, monkeypatch):
     """Non-testing app startup should fail when required secure keys are absent."""
 
     from app import create_app
     from config import Config
+
+    monkeypatch.delenv("FLASK_DEBUG", raising=False)
 
     class MissingKeyConfig(Config):
         SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
@@ -45,11 +47,13 @@ def test_startup_validation_raises_when_keys_missing(tmp_path):
         create_app(MissingKeyConfig)
 
 
-def test_dev_config_allows_local_temp_keys(tmp_path):
+def test_dev_config_allows_local_temp_keys(tmp_path, monkeypatch):
     """Development config should allow temporary fallback keys for local dev ergonomics."""
 
     from app import create_app
     from config import DevelopmentConfig
+
+    monkeypatch.setenv("FLASK_DEBUG", "1")
 
     class LocalDevConfig(DevelopmentConfig):
         SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
@@ -60,3 +64,4 @@ def test_dev_config_allows_local_temp_keys(tmp_path):
 
     assert app.config["SECRET_KEY"]
     assert app.config["JWT_SECRET_KEY"]
+    assert app.debug is True
