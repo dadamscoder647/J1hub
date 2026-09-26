@@ -6,7 +6,7 @@ J1Hub is a seasonal-workforce marketplace with worker, employer, and administrat
 
 ### Backend
 
-Use Python 3.11 or later:
+Use Python 3.12, the version pinned for local development and CI:
 
 ```bash
 python3 -m venv .venv
@@ -20,13 +20,15 @@ export DATABASE_URL='sqlite:///app.db'
 export UPLOAD_DIR='workspace/uploads'
 export ORIGINS='http://localhost:5173'
 export FLASK_APP='app:create_app'
+export SEED_ADMIN_EMAIL='admin@example.com'
+export SEED_ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 
 flask db upgrade
 python scripts/seed_admin.py
 python app.py
 ```
 
-The API listens on `http://localhost:5000`. The seed script uses its documented local-only defaults in development and requires `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in other environments. Public registration can create worker and employer accounts only; provision administrators through the seed script or another trusted operator process.
+The development runner listens on port `5000` and binds to `0.0.0.0`, so it may be reachable from other devices on the host's network. Seed scripts require explicit non-empty credentials in every environment. `seed_admin.py` uses `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`; it can create an administrator or reset the password and role of an account matching that email on the database selected by `DATABASE_URL`, so verify the target before running it. `seed_demo_data.py` also requires the employer and worker email/password variables; `bootstrap_demo.py` requires all six `SEED_ADMIN_*`, `SEED_EMPLOYER_*`, and `SEED_WORKER_*` values. These demo scripts update matching users and records, so run them only against a disposable local database. Public registration can create worker and employer accounts only; provision administrators through the seed script or another trusted operator process.
 
 ### Frontend
 
@@ -60,24 +62,28 @@ Verification review and listing search are paginated. A pending queue response h
 
 Verification uploads are stored beneath `UPLOAD_DIR`. The API enforces a size limit, permitted extension and MIME pairs, content signatures for PDF/PNG/JPEG, and path containment. `ALLOWED_UPLOAD_TYPES` can further restrict the MIME values in the built-in extension map.
 
-Outside tests and the explicitly selected `DevelopmentConfig`, startup rejects `DEBUG`, an enabled `FLASK_DEBUG`, and an enabled Flask CLI debugger, and requires distinct Flask/JWT signing keys that are at least 32 characters; known checked-in placeholder, test-fixture, and CI key values are also rejected. Setting `APP_ENV=development` does not enable the local `DevelopmentConfig` exception. The direct `app.py` runner explicitly disables debug mode after dotenv loading. Generate separate random keys for local work; never reuse them in production. If Stripe is enabled, `STRIPE_WEBHOOK_SECRET` is required. Checkout also needs valid `PRICE_LISTING` and `PRICE_MONTHLY` values. Set `BILLING_SUCCESS_URL` and `BILLING_CANCEL_URL` explicitly, or set `FRONTEND_URL` to the deployed frontend base URL to derive `/billing/success?session_id={CHECKOUT_SESSION_ID}` and `/billing/cancel`. When `ORIGINS` is unset, `FRONTEND_URL` also supplies the single CORS origin.
+Outside tests and the explicitly selected `DevelopmentConfig`, startup rejects `DEBUG`, an enabled `FLASK_DEBUG`, and an enabled Flask CLI debugger, and requires distinct Flask/JWT signing keys that are at least 32 characters; known checked-in placeholder, test-fixture, and CI key values are also rejected. Setting `APP_ENV=development` does not enable the local `DevelopmentConfig` exception. The direct `app.py` runner explicitly disables debug mode after dotenv loading. Generate separate random keys for local work; never reuse them in production. If Stripe is enabled, `STRIPE_WEBHOOK_SECRET` is required. Checkout also needs valid `PRICE_LISTING` and `PRICE_MONTHLY` values. Set `BILLING_SUCCESS_URL` and `BILLING_CANCEL_URL` explicitly, or set `FRONTEND_URL` to the deployed frontend base URL to derive `/billing/success?session_id={CHECKOUT_SESSION_ID}` and `/billing/cancel`. When `ORIGINS` is unset, `FRONTEND_URL` supplies the CORS origin; if both are unset, CORS falls back to `*`, so set an explicit origin in deployed environments.
 
 ## Render staging
 
 The root `render.yaml` is a reviewable Blueprint proposal for a paid, single-instance staging API, private PostgreSQL 16 database, persistent upload disk, and static React frontend. It tracks `main`, runs Alembic before startup, and disables per-service auto-deploys. The API normalizes Render's `postgresql://` URL and the legacy `postgres://` alias to `postgresql+psycopg://`. The first explicit Blueprint apply still provisions resources and starts an initial deployment. After linking, set Blueprint Auto Sync to No before future branch updates. Review the proposed monthly cost and operational limits before provisioning. Do not add Stripe keys to the Blueprint; configure test-mode values in Render only after staging is approved.
 
-For local Stripe testing, use test-mode Stripe credentials and the webhook signing secret from the local Stripe CLI. The webhook validates the signature and records event IDs so a retry does not grant credits twice. No live Stripe action is part of local setup or CI.
+For local Stripe testing, use test-mode Stripe credentials and the webhook signing secret from the local Stripe CLI. The webhook validates the signature and records event IDs so a retry does not grant credits twice. Successful checkout and `invoice.paid` events activate or extend the recorded paid period. Cancellation or failed payment does not remove access before `active_until`; access expires when that timestamp passes without a successful renewal. No live Stripe action is part of local setup or CI.
 
 ## Database migrations
 
 ```bash
 export FLASK_APP='app:create_app'
 flask db heads
+flask db history
+flask db current
 flask db upgrade
 flask db check
 ```
 
-The current migration graph should have one head. The PostgreSQL CI job upgrades a clean database and checks model/schema parity; it also upgrades a database seeded at the previous mainline head and verifies that a stored verification document survives. Take a database backup before production migrations. The legacy visa-document conversion preserves existing rows, and the unique-application migration stops with an actionable error if duplicate records need operator review.
+After changing a model, generate a migration with `flask db migrate -m "describe schema change"`, then review the generated revision for correctness and data preservation before applying it. Do not run `flask db init` in this checkout; its migration metadata and history are already present.
+
+The current migration graph should have one head. The PostgreSQL CI job upgrades a clean database and checks model/schema parity; it also upgrades a database seeded at a previous migration state and verifies that a stored verification document survives. Take a database backup before production migrations. The corrected visa-document conversion preserves rows when revision `d4d19a25492d` is applied from an earlier revision; a database that already recorded that revision as applied will not rerun the corrected code. Inspect the deployed Alembic revision and recover affected data from a backup or export if needed. The unique-application migration stops with an actionable error if duplicate records need operator review.
 
 ## Checks
 

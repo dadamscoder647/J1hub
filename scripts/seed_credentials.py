@@ -1,39 +1,15 @@
-"""Shared seed credential helpers for local scripts."""
+"""Shared input validation for credentials used by seed scripts."""
 
 from __future__ import annotations
 
 import os
-import sys
-
-DEFAULT_ADMIN_EMAIL = "admin@example.com"  # Local-development default
-DEFAULT_ADMIN_PASSWORD = "AdminPass123"  # Local-development default
-DEFAULT_EMPLOYER_EMAIL = "employer@example.com"  # Local-development default
-DEFAULT_EMPLOYER_PASSWORD = "EmployerPass123"  # Local-development default
-DEFAULT_WORKER_EMAIL = "worker@example.com"  # Local-development default
-DEFAULT_WORKER_PASSWORD = "WorkerPass123"  # Local-development default
 
 
-def get_seed_env_value(script_name: str, env_var: str, default: str) -> str:
-    """Return an env value or fallback to local-development defaults with warning."""
-
+def get_seed_env_value(script_name: str, env_var: str) -> str:
+    """Return a required seed value without falling back to predictable credentials."""
     value = os.getenv(env_var)
-    if value and value.strip():
-        return value.strip()
-
-    environment = (
-        os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or os.getenv("ENV") or "production"
-    ).strip().lower()
-    if environment not in {"development", "dev", "local", "testing", "test"}:
+    if not value or not value.strip():
         raise RuntimeError(
-            f"{env_var} must be set before running {script_name} outside local development."
+            f"{env_var} must be set to a non-empty value before running {script_name}."
         )
-
-    default_preview = "[redacted]" if "PASSWORD" in env_var else repr(default)
-    print(
-        (
-            f"[{script_name}] WARNING: {env_var} is not set. "
-            f"Using local-development default value: {default_preview}."
-        ),
-        file=sys.stderr,
-    )
-    return default
+    return value.strip()

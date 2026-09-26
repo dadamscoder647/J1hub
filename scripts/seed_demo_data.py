@@ -8,13 +8,7 @@ from models import db
 from models.application import Application
 from models.listing import Listing
 from models.user import User
-from scripts.seed_credentials import (
-    DEFAULT_EMPLOYER_EMAIL,
-    DEFAULT_EMPLOYER_PASSWORD,
-    DEFAULT_WORKER_EMAIL,
-    DEFAULT_WORKER_PASSWORD,
-    get_seed_env_value,
-)
+from scripts.seed_credentials import get_seed_env_value
 
 
 def get_or_create_user(
@@ -45,16 +39,16 @@ def get_or_create_user(
 
 def main() -> None:
     employer_email = get_seed_env_value(
-        "seed_demo_data", "SEED_EMPLOYER_EMAIL", DEFAULT_EMPLOYER_EMAIL
+        "seed_demo_data", "SEED_EMPLOYER_EMAIL"
     )
     employer_password = get_seed_env_value(
-        "seed_demo_data", "SEED_EMPLOYER_PASSWORD", DEFAULT_EMPLOYER_PASSWORD
+        "seed_demo_data", "SEED_EMPLOYER_PASSWORD"
     )
     worker_email = get_seed_env_value(
-        "seed_demo_data", "SEED_WORKER_EMAIL", DEFAULT_WORKER_EMAIL
+        "seed_demo_data", "SEED_WORKER_EMAIL"
     )
     worker_password = get_seed_env_value(
-        "seed_demo_data", "SEED_WORKER_PASSWORD", DEFAULT_WORKER_PASSWORD
+        "seed_demo_data", "SEED_WORKER_PASSWORD"
     )
 
     app = create_app()

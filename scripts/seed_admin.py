@@ -3,19 +3,15 @@
 from app import create_app
 from models import db
 from models.user import User
-from scripts.seed_credentials import (
-    DEFAULT_ADMIN_EMAIL,
-    DEFAULT_ADMIN_PASSWORD,
-    get_seed_env_value,
-)
+from scripts.seed_credentials import get_seed_env_value
 
 
 def main() -> None:
     admin_email = get_seed_env_value(
-        "seed_admin", "SEED_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
+        "seed_admin", "SEED_ADMIN_EMAIL"
     )
     admin_password = get_seed_env_value(
-        "seed_admin", "SEED_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD
+        "seed_admin", "SEED_ADMIN_PASSWORD"
     )
 
     app = create_app()

@@ -14,15 +14,7 @@ from app import create_app
 from models import db
 from models.listing import Listing
 from models.user import User
-from scripts.seed_credentials import (
-    DEFAULT_ADMIN_EMAIL,
-    DEFAULT_ADMIN_PASSWORD,
-    DEFAULT_EMPLOYER_EMAIL,
-    DEFAULT_EMPLOYER_PASSWORD,
-    DEFAULT_WORKER_EMAIL,
-    DEFAULT_WORKER_PASSWORD,
-    get_seed_env_value,
-)
+from scripts.seed_credentials import get_seed_env_value
 
 
 @dataclass
@@ -105,22 +97,22 @@ def bootstrap() -> CreatedRecords:
     """Bootstrap the demo records and return their identifiers."""
 
     admin_email = get_seed_env_value(
-        "bootstrap_demo", "SEED_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL
+        "bootstrap_demo", "SEED_ADMIN_EMAIL"
     )
     admin_password = get_seed_env_value(
-        "bootstrap_demo", "SEED_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD
+        "bootstrap_demo", "SEED_ADMIN_PASSWORD"
     )
     employer_email = get_seed_env_value(
-        "bootstrap_demo", "SEED_EMPLOYER_EMAIL", DEFAULT_EMPLOYER_EMAIL
+        "bootstrap_demo", "SEED_EMPLOYER_EMAIL"
     )
     employer_password = get_seed_env_value(
-        "bootstrap_demo", "SEED_EMPLOYER_PASSWORD", DEFAULT_EMPLOYER_PASSWORD
+        "bootstrap_demo", "SEED_EMPLOYER_PASSWORD"
     )
     worker_email = get_seed_env_value(
-        "bootstrap_demo", "SEED_WORKER_EMAIL", DEFAULT_WORKER_EMAIL
+        "bootstrap_demo", "SEED_WORKER_EMAIL"
     )
     worker_password = get_seed_env_value(
-        "bootstrap_demo", "SEED_WORKER_PASSWORD", DEFAULT_WORKER_PASSWORD
+        "bootstrap_demo", "SEED_WORKER_PASSWORD"
     )
 
     app = create_app()
