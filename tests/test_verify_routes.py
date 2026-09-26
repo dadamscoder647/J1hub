@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from flask_jwt_extended import create_access_token
 
 from models import db
@@ -81,6 +82,68 @@ def test_upload_document_rejects_disallowed_extension(app, client):
     payload = response.get_json()
     assert payload["error"] == "Bad Request"
     assert "File type not allowed" in payload["detail"]
+
+
+@pytest.mark.parametrize("legacy_types", [[], ["text/plain"]])
+def test_upload_fails_closed_for_empty_or_nonmatching_legacy_mime_allowlist(
+    app, client, legacy_types, monkeypatch
+):
+    """An invalid legacy MIME allowlist must never restore every built-in type."""
+
+    with app.app_context():
+        user = _create_user("blocked-mime-config@example.com")
+        user_id = user.id
+    app.config["ALLOWED_UPLOAD_TYPES"] = legacy_types
+    monkeypatch.setattr(
+        "routes.verify.LocalStorage.save",
+        lambda *args, **kwargs: pytest.fail("invalid upload config must not write files"),
+    )
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.get_json()["detail"].lower()
+    with app.app_context():
+        assert VisaDocument.query.filter_by(user_id=user_id).count() == 0
+
+
+@pytest.mark.parametrize("rule_config", [{}, None, "invalid"])
+def test_upload_fails_closed_for_empty_or_invalid_explicit_rule_map(
+    app, client, rule_config, monkeypatch
+):
+    """An explicit empty or invalid MIME map must not restore built-in types."""
+
+    with app.app_context():
+        user = _create_user("blocked-rule-config@example.com")
+        user_id = user.id
+    app.config["ALLOWED_UPLOAD_RULES"] = rule_config
+    monkeypatch.setattr(
+        "routes.verify.LocalStorage.save",
+        lambda *args, **kwargs: pytest.fail("invalid upload config must not write files"),
+    )
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.get_json()["detail"].lower()
+    with app.app_context():
+        assert VisaDocument.query.filter_by(user_id=user_id).count() == 0
 
 
 def test_upload_request_size_is_capped_before_file_parsing(app, client):

@@ -46,7 +46,6 @@ class Config:
 
     Environment variables:
         MAX_UPLOAD_SIZE: Maximum upload size in bytes (default 10 MB).
-        ALLOWED_UPLOAD_RULES: Mapping of extension -> allowed MIME type(s) for uploads.
     """
 
     # Core
@@ -68,6 +67,7 @@ class Config:
         "jpg": ["image/jpeg"],
         "jpeg": ["image/jpeg"],
     }
+    # Programmatic extension-to-MIME map; this is not read from the environment.
     # Backwards-compatible flattened MIME list consumed by older checks.
     ALLOWED_UPLOAD_TYPES: ClassVar[list[str]] = [
         mime.strip().lower()

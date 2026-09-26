@@ -12,7 +12,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file
 from flask.typing import ResponseReturnValue
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from werkzeug.datastructures import FileStorage
-from werkzeug.exceptions import BadRequest, Forbidden, NotFound
+from werkzeug.exceptions import BadRequest, Forbidden, NotFound, ServiceUnavailable
 
 from models import db
 from models.user import User
@@ -97,7 +97,12 @@ def _get_allowed_upload_rules() -> dict[str, set[str]]:
     configured = current_app.config.get("ALLOWED_UPLOAD_RULES")
     normalized: dict[str, set[str]] = {}
 
-    if isinstance(configured, dict):
+    if "ALLOWED_UPLOAD_RULES" not in current_app.config:
+        normalized = {
+            extension: set(mimes)
+            for extension, mimes in ALLOWED_UPLOAD_RULES_DEFAULT.items()
+        }
+    elif isinstance(configured, dict):
         for extension, mimes in configured.items():
             if not isinstance(extension, str):
                 continue
@@ -130,7 +135,7 @@ def _get_allowed_upload_rules() -> dict[str, set[str]]:
         for value in legacy_values
         if isinstance(value, str) and value.strip()
     }
-    if allowed_legacy_types and normalized:
+    if legacy_types is not None and normalized:
         normalized = {
             extension: mimes & allowed_legacy_types
             for extension, mimes in normalized.items()
@@ -138,7 +143,7 @@ def _get_allowed_upload_rules() -> dict[str, set[str]]:
         }
 
     if not normalized:
-        return {ext: set(mimes) for ext, mimes in ALLOWED_UPLOAD_RULES_DEFAULT.items()}
+        return {}
     if "jpeg" in normalized and "jpg" not in normalized:
         normalized["jpg"] = set(normalized["jpeg"])
     if "jpg" in normalized and "jpeg" not in normalized:
@@ -178,6 +183,10 @@ def _validate_document(file: FileStorage) -> str:
         raise BadRequest("File must include a valid extension.")
 
     allowed_rules = _get_allowed_upload_rules()
+    if not allowed_rules:
+        raise ServiceUnavailable(
+            "Document upload types are not configured. Contact support."
+        )
     extension = file.filename.rsplit(".", 1)[-1].lower()
     if extension not in allowed_rules:
         allowed = ", ".join(sorted(allowed_rules))
