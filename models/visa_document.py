@@ -4,7 +4,6 @@ from datetime import datetime
 
 from . import db
 
-
 VISA_DOCUMENT_STATUSES = ("pending", "approved", "rejected")
 
 
@@ -35,7 +34,6 @@ class VisaDocument(db.Model):
         db.Boolean,
         nullable=False,
         default=False,
-        server_default=db.text("0"),
     )
     created_at = db.Column(
         db.DateTime,

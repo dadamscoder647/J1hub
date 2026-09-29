@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from flask_jwt_extended import create_access_token
 
 from models import db
@@ -34,7 +35,7 @@ def test_upload_document_creates_pending_record(app, client):
         user_id = user.id
 
     data = {
-        "document": (BytesIO(b"PDF data"), "visa.pdf"),
+        "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
         "waiver": "true",
     }
 
@@ -58,6 +59,138 @@ def test_upload_document_creates_pending_record(app, client):
     assert document.waiver_acknowledged is True
     stored_file = Path(app.config["UPLOAD_DIR"]) / document.file_path
     assert stored_file.exists()
+
+
+def test_upload_document_rejects_disallowed_extension(app, client):
+    """Uploading a file with an unsupported extension returns 400."""
+
+    with app.app_context():
+        user = _create_user("blocked-ext@example.com")
+        user_id = user.id
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"MZ\x00\x02"), "malware.exe"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+    assert "File type not allowed" in payload["detail"]
+
+
+@pytest.mark.parametrize("legacy_types", [[], ["text/plain"]])
+def test_upload_fails_closed_for_empty_or_nonmatching_legacy_mime_allowlist(
+    app, client, legacy_types, monkeypatch
+):
+    """An invalid legacy MIME allowlist must never restore every built-in type."""
+
+    with app.app_context():
+        user = _create_user("blocked-mime-config@example.com")
+        user_id = user.id
+    app.config["ALLOWED_UPLOAD_TYPES"] = legacy_types
+    monkeypatch.setattr(
+        "routes.verify.LocalStorage.save",
+        lambda *args, **kwargs: pytest.fail("invalid upload config must not write files"),
+    )
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.get_json()["detail"].lower()
+    with app.app_context():
+        assert VisaDocument.query.filter_by(user_id=user_id).count() == 0
+
+
+@pytest.mark.parametrize("rule_config", [{}, None, "invalid"])
+def test_upload_fails_closed_for_empty_or_invalid_explicit_rule_map(
+    app, client, rule_config, monkeypatch
+):
+    """An explicit empty or invalid MIME map must not restore built-in types."""
+
+    with app.app_context():
+        user = _create_user("blocked-rule-config@example.com")
+        user_id = user.id
+    app.config["ALLOWED_UPLOAD_RULES"] = rule_config
+    monkeypatch.setattr(
+        "routes.verify.LocalStorage.save",
+        lambda *args, **kwargs: pytest.fail("invalid upload config must not write files"),
+    )
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n"), "visa.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.get_json()["detail"].lower()
+    with app.app_context():
+        assert VisaDocument.query.filter_by(user_id=user_id).count() == 0
+
+
+def test_upload_request_size_is_capped_before_file_parsing(app, client):
+    """Oversized multipart bodies are rejected by Flask before upload parsing."""
+
+    with app.app_context():
+        user = _create_user("oversized@example.com")
+        user_id = user.id
+    app.config["MAX_CONTENT_LENGTH"] = 128
+
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(b"%PDF-1.7\n" + b"x" * 1024), "large.pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 413
+    with app.app_context():
+        assert VisaDocument.query.count() == 0
+
+
+def test_upload_document_rejects_spoofed_content(app, client):
+    """Uploading a mismatched extension/content pair is rejected."""
+
+    with app.app_context():
+        user = _create_user("spoofed@example.com")
+        user_id = user.id
+
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"data"
+    response = client.post(
+        "/verify/upload",
+        data={
+            "document": (BytesIO(png_bytes), "identity.pdf", "application/pdf"),
+            "waiver": "true",
+        },
+        headers=_auth_headers(app, user_id),
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == "Bad Request"
+    assert "does not match the file extension" in payload["detail"]
 
 
 def test_status_endpoint_returns_latest_document(app, client):
@@ -95,6 +228,7 @@ def test_status_endpoint_returns_latest_document(app, client):
         headers=_auth_headers(app, user_id),
     )
     assert response.status_code == 200
+    assert "Warning" not in response.headers
     payload = response.get_json()
     assert payload["verification_status"] == "approved"
     assert payload["latest_document"]["filename"] == "second.pdf"
@@ -108,8 +242,8 @@ def test_admin_list_pending_documents_returns_only_pending(app, client):
         worker_one = _create_user("pending1@example.com")
         worker_two = _create_user("pending2@example.com")
         worker_three = _create_user("approved@example.com")
-        older_time = datetime.utcnow() - timedelta(days=1)
-        newer_time = datetime.utcnow()
+        older_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+        newer_time = datetime.now(UTC).replace(tzinfo=None)
         pending_old = VisaDocument(
             user_id=worker_one.id,
             filename="old.pdf",
@@ -143,20 +277,86 @@ def test_admin_list_pending_documents_returns_only_pending(app, client):
         pending_new_id = pending_new.id
 
     response = client.get(
-        "/admin/verify/pending",
+        "/api/v1/admin/verify/pending",
         headers=_auth_headers(app, admin_id),
     )
 
     assert response.status_code == 200
+    assert "Warning" not in response.headers
     payload = response.get_json()
-    assert isinstance(payload, list)
-    assert [item["id"] for item in payload] == [pending_old_id, pending_new_id]
-    for item in payload:
+    assert payload["count"] == 2
+    assert payload["pagination"] == {
+        "page": 1,
+        "per_page": 20,
+        "total": 2,
+        "total_pages": 1,
+        "has_next": False,
+        "has_prev": False,
+    }
+    assert [item["id"] for item in payload["results"]] == [
+        pending_old_id,
+        pending_new_id,
+    ]
+    for item in payload["results"]:
         assert set(item.keys()) == {"id", "user_id", "filename", "created_at"}
         assert item["created_at"] is not None
         # Ensure ISO-8601 parseable string
         parsed = datetime.fromisoformat(item["created_at"])
         assert isinstance(parsed, datetime)
+
+
+def test_admin_list_pending_documents_pagination_and_limit_cap(app, client):
+    """Admin pending list supports paging and caps per_page to max."""
+
+    with app.app_context():
+        admin = _create_user("admin-paging@example.com", role="admin")
+        worker = _create_user("pending-paging@example.com")
+        base_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+        documents = [
+            VisaDocument(
+                user_id=worker.id,
+                filename=f"doc-{index}.pdf",
+                file_path=f"doc-{index}.pdf",
+                file_type="application/pdf",
+                status="pending",
+                waiver_acknowledged=True,
+                created_at=base_time + timedelta(minutes=index),
+            )
+            for index in range(101)
+        ]
+        db.session.add_all(documents)
+        db.session.commit()
+        admin_id = admin.id
+
+    page_two_response = client.get(
+        "/api/v1/admin/verify/pending?page=2&per_page=2",
+        headers=_auth_headers(app, admin_id),
+    )
+    assert page_two_response.status_code == 200
+    page_two_payload = page_two_response.get_json()
+    assert page_two_payload["count"] == 2
+    assert [item["filename"] for item in page_two_payload["results"]] == [
+        "doc-2.pdf",
+        "doc-3.pdf",
+    ]
+    assert page_two_payload["pagination"] == {
+        "page": 2,
+        "per_page": 2,
+        "total": 101,
+        "total_pages": 51,
+        "has_next": True,
+        "has_prev": True,
+    }
+
+    capped_response = client.get(
+        "/api/v1/admin/verify/pending?page=1&per_page=1000",
+        headers=_auth_headers(app, admin_id),
+    )
+    assert capped_response.status_code == 200
+    capped_payload = capped_response.get_json()
+    assert capped_payload["count"] == 100
+    assert capped_payload["pagination"]["per_page"] == 100
+    assert capped_payload["pagination"]["total_pages"] == 2
 
 
 def test_admin_can_download_document(app, client):
@@ -215,10 +415,11 @@ def test_admin_approve_updates_user_status(app, client):
         document_id = document.id
 
     response = client.post(
-        f"/verify/{document_id}/approve",
+        f"/api/v1/admin/verify/{document_id}/approve",
         headers=_auth_headers(app, admin_id),
     )
     assert response.status_code == 200
+    assert "Warning" not in response.headers
     payload = response.get_json()
     assert payload["status"] == "approved"
     assert payload["verification_status"] == "approved"
@@ -255,7 +456,7 @@ def test_admin_reject_updates_note_and_status(app, client):
         document_id = document.id
 
     response = client.post(
-        f"/verify/{document_id}/reject",
+        f"/api/v1/admin/verify/{document_id}/reject",
         json={"review_note": "Missing signature"},
         headers=_auth_headers(app, admin_id),
     )
@@ -272,6 +473,40 @@ def test_admin_reject_updates_note_and_status(app, client):
     assert refreshed_document.reviewer_id == admin.id
     assert refreshed_user.verification_status == "rejected"
     assert refreshed_user.is_verified is False
+
+
+def test_legacy_admin_routes_include_deprecation_warning(app, client):
+    """Legacy /verify admin aliases remain available but emit warning header."""
+
+    with app.app_context():
+        admin = _create_user("legacy-admin@example.com", role="admin")
+        worker = _create_user("legacy-worker@example.com")
+        document = VisaDocument(
+            user_id=worker.id,
+            filename="legacy.pdf",
+            file_path="legacy.pdf",
+            file_type="application/pdf",
+            status="pending",
+            waiver_acknowledged=True,
+        )
+        db.session.add(document)
+        db.session.commit()
+        admin_id = admin.id
+        document_id = document.id
+
+    response_pending = client.get(
+        "/verify/pending",
+        headers=_auth_headers(app, admin_id),
+    )
+    response_approve = client.post(
+        f"/verify/{document_id}/approve",
+        headers=_auth_headers(app, admin_id),
+    )
+
+    assert response_pending.status_code == 200
+    assert "deprecated" in response_pending.headers.get("Warning", "").lower()
+    assert response_approve.status_code == 200
+    assert "deprecated" in response_approve.headers.get("Warning", "").lower()
 
 
 def test_non_admin_cannot_access_admin_routes(app, client):
@@ -301,11 +536,11 @@ def test_non_admin_cannot_access_admin_routes(app, client):
         headers=_auth_headers(app, worker_id),
     )
     response_approve = client.post(
-        f"/verify/{document_id}/approve",
+        f"/admin/verify/{document_id}/approve",
         headers=_auth_headers(app, worker_id),
     )
     response_reject = client.post(
-        f"/verify/{document_id}/reject",
+        f"/admin/verify/{document_id}/reject",
         headers=_auth_headers(app, worker_id),
     )
 
