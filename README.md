@@ -2,6 +2,20 @@
 
 J1Hub is a seasonal-workforce marketplace with worker, employer, and administrator workflows. The Flask API and React frontend cover account access, verification-document review, listings, applications, notifications, and Stripe billing.
 
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `app.py`, `config.py` | Flask application factory, extension and route setup, environment-backed configuration, and error handling. |
+| `routes/` | Authentication, verification, listings/applications, billing, and notification API endpoints. |
+| `models/` | SQLAlchemy records for users, listings, applications, verification documents, subscriptions, billing events, and notifications. |
+| `services/`, `storage/` | Notification creation and the local document-storage implementation behind the storage interface. |
+| `migrations/` | Alembic environment and the checked-in database revision history. |
+| `frontend/` | React, TypeScript, and Vite client with worker, employer, and administrator screens. |
+| `scripts/` | Explicit-credential seed tools and migration, OpenAPI, and Render Blueprint checks. |
+| `tests/` | Backend API/domain tests; `frontend/e2e/` contains the Playwright smoke suite. |
+| `openapi.yaml`, `docs/` | API contract, frontend billing integration notes, and release checklist. |
+
 ## User workflows
 
 | Role | Main workflow |
@@ -126,7 +140,9 @@ Approve or reject the document after review:
 
 ### Employer listing and billing
 
-An employer can create a listing only with an active subscription or available listing credit. The example below is for a test environment only. Creating a checkout session contacts Stripe; use test-mode credentials and test Price IDs, with the webhook secret configured. Do not send it to a live Stripe account without separate approval.
+An employer can create a listing only with an active subscription or available listing credit. The example below is for a test environment only. Creating a checkout session contacts Stripe; use test-mode credentials and test Price IDs. For local test billing, set `STRIPE_SECRET_KEY`, the applicable test Price ID (`PRICE_LISTING` or `PRICE_MONTHLY`), and valid `BILLING_SUCCESS_URL` and `BILLING_CANCEL_URL` values, or set `FRONTEND_URL` so the app can derive them. The copied `.env.example` contains placeholder billing values and explicit example return URLs; replace those URLs or clear both overrides when `FRONTEND_URL` is set. Clearing them without `FRONTEND_URL` leaves the return URLs unset, and checkout returns an error. If `STRIPE_SECRET_KEY` is set, the app also requires `STRIPE_WEBHOOK_SECRET`.
+
+The webhook endpoint `/api/v1/billing/webhook` verifies Stripe signatures. A local server is not publicly reachable by Stripe, so forward test events to it with a local webhook forwarder or tunnel and configure the signing secret supplied by that forwarder. For a deployed test environment, configure the Stripe test-mode webhook with that service URL and use its endpoint signing secret. Keep credentials out of source control and never use live Stripe without separate approval. See [`docs/frontend_billing_integration.md`](docs/frontend_billing_integration.md) for billing status/history response fields.
 
     curl -sS -X POST "$BASE_URL/billing/create-checkout-session" \
       -H "Authorization: Bearer $EMPLOYER_TOKEN" \
@@ -158,6 +174,15 @@ The repository’s render.yaml is a review-only proposal. Applying it provisions
 The current upload setting does not interpret extension-only ALLOWED_UPLOAD_TYPES values. Decide whether to keep the MIME-only behavior or separately add compatibility for old values such as pdf and png. Do not broaden MIME/extension acceptance without reviewing the content-signature checks.
 
 If the uniqueness migration finds duplicate worker/listing applications, it stops for operator review. Resolve any existing duplicates deliberately; do not automatically delete application records.
+
+## Troubleshooting
+
+- **Startup reports invalid signing keys:** set separate, random `SECRET_KEY` and `JWT_SECRET_KEY` values of at least 32 characters. `APP_ENV=development` labels the environment; it does not select `DevelopmentConfig`. The Flask CLI can load `.env`; the direct `python app.py` runner requires exported variables.
+- **Browser requests fail CORS checks:** set `ORIGINS` to the exact frontend origin. A wildcard fallback is available only when both `ORIGINS` and `FRONTEND_URL` are unset; do not rely on it for deployment.
+- **A verification upload is rejected:** check the per-file size and confirm that the extension, recognized file signature, and any declared MIME type match an allowed PDF, PNG, or JPEG. `ALLOWED_UPLOAD_TYPES` accepts MIME values only; extension-only values such as `pdf` or `png` do not work.
+- **A database command reports an unexpected revision or duplicate application rows:** first confirm `DATABASE_URL` targets the intended database, then inspect `flask db current`, `flask db history`, and `flask db heads`. Apply checked-in revisions with `flask db upgrade`; do not run `flask db init`. The application uniqueness migration stops for manual review if duplicate worker/listing rows exist.
+- **Checkout or webhook setup fails:** see [Employer listing and billing](#employer-listing-and-billing) for test-mode keys, Price IDs, return URLs, and local event forwarding. Confirm the webhook signing secret matches the endpoint or local forwarder; never disable signature validation to make a request pass.
+- **The health route succeeds but API data is unavailable:** `GET /api/v1/health` reports process health only. Check the API logs and the `X-Request-ID` response header while investigating database connectivity.
 
 ## Database and release operations
 
