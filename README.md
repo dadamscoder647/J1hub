@@ -171,7 +171,7 @@ Billing status and history are available to authenticated employers and administ
 
 The repository’s render.yaml is a review-only proposal. Applying it provisions the configured API, PostgreSQL database, persistent upload disk, and static frontend, then starts an initial deployment. Confirm current plan charges and review the resource footprint in Render before applying; this draft does not estimate cost. Service auto-deploy is off, but Blueprint Auto Sync is separate; set it to No before later branch updates. Keep Stripe values out of the Blueprint and add approved test-mode values only after staging is authorized.
 
-The current upload setting does not interpret extension-only ALLOWED_UPLOAD_TYPES values. Decide whether to keep the MIME-only behavior or separately add compatibility for old values such as pdf and png. Do not broaden MIME/extension acceptance without reviewing the content-signature checks.
+For a fresh deployment using the proposed Render Blueprint, leave `ALLOWED_UPLOAD_TYPES` unset so the built-in MIME allowlist applies. The setting accepts MIME types only; extension-only values such as `pdf,png` are unsupported and fail closed. Before migrating a separately configured service, inspect its current value and replace extension tokens with intended MIME values or unset the variable. Do not add extension-token compatibility without reviewing the content-signature checks.
 
 If the uniqueness migration finds duplicate worker/listing applications, it stops for operator review. Resolve any existing duplicates deliberately; do not automatically delete application records.
 
