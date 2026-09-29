@@ -239,6 +239,9 @@ paths:
         '403':
           $ref: '#/components/responses/ErrorResponse'
   /verify/pending:
+    servers:
+      - url: /
+        description: Legacy-only alias
     get:
       deprecated: true
       summary: Deprecated legacy pending-verification alias
