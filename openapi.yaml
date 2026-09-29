@@ -685,6 +685,22 @@ paths:
     get:
       summary: List the authenticated user's notifications
       operationId: listNotifications
+      parameters:
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         '200':
           description: User notifications
@@ -692,7 +708,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [results, count]
+                required: [results, count, pagination]
                 properties:
                   results:
                     type: array
@@ -700,7 +716,27 @@ paths:
                       type: object
                   count:
                     type: integer
+                  pagination:
+                    type: object
+                    required: [page, per_page, total, total_pages, has_next, has_prev]
+                    properties:
+                      page:
+                        type: integer
+                      per_page:
+                        type: integer
+                      total:
+                        type: integer
+                      total_pages:
+                        type: integer
+                      has_next:
+                        type: boolean
+                      has_prev:
+                        type: boolean
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
         '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
           $ref: '#/components/responses/ErrorResponse'
   /notifications/{notification_id}/read:
     post:

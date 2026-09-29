@@ -15,6 +15,9 @@ class Notification(db.Model):
     """Represents an in-app notification."""
 
     __tablename__ = "notifications"
+    __table_args__ = (
+        db.Index("ix_notifications_user_created_id", "user_id", "created_at", "id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)

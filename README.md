@@ -75,7 +75,7 @@ The canonical API prefix is /api/v1. The OpenAPI contract is in openapi.yaml. Us
 | Billing | GET /api/v1/billing/status, GET /api/v1/billing/history, POST /api/v1/billing/create-checkout-session, POST /api/v1/billing/webhook |
 | Notifications | GET /api/v1/notifications, POST /api/v1/notifications/{notification_id}/read |
 
-Search listings with category, q, city, active, page, and per_page query parameters. Listing search and the administrator pending queue return results, count, and pagination metadata.
+Search listings with category, q, city, active, page, and per_page query parameters. Listing search, the administrator pending queue, and the authenticated notifications list return results, count, and pagination metadata. Notification listing defaults to 20 items per page and caps per_page at 100.
 
 ### Register and sign in
 

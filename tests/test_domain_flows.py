@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from flask_jwt_extended import create_access_token
 
 from models import db
@@ -182,3 +184,78 @@ def test_verification_and_billing_notifications(app, client):
         db.session.commit()
         assert Notification.query.filter_by(user_id=worker_id, event_type="verification_result").count() == 1
         assert Notification.query.filter_by(user_id=worker_id, event_type="billing_credit_change").count() == 1
+
+
+def test_notification_list_is_paginated_and_scoped_to_user(app, client):
+    with app.app_context():
+        worker = _create_user("worker-notifications@example.com", "worker")
+        other_worker = _create_user("other-notifications@example.com", "worker")
+        worker_id = worker.id
+        other_worker_id = other_worker.id
+        base_time = datetime.now(UTC).replace(tzinfo=None)
+        notifications = [
+            Notification(
+                user_id=worker_id,
+                event_type="application_update",
+                title=f"Update {index}",
+                message="Application status changed.",
+                created_at=base_time + timedelta(minutes=index),
+            )
+            for index in range(3)
+        ]
+        db.session.add_all(notifications)
+        db.session.add(
+            Notification(
+                user_id=other_worker_id,
+                event_type="application_update",
+                title="Private update",
+                message="Belongs to another user.",
+                created_at=base_time + timedelta(hours=1),
+            )
+        )
+        db.session.commit()
+
+    headers = _auth_header(app, worker_id)
+    page_one = client.get("/api/v1/notifications?per_page=2", headers=headers)
+    assert page_one.status_code == 200
+    page_one_payload = page_one.get_json()
+    assert [item["title"] for item in page_one_payload["results"]] == [
+        "Update 2",
+        "Update 1",
+    ]
+    assert page_one_payload["count"] == 2
+    assert page_one_payload["pagination"] == {
+        "page": 1,
+        "per_page": 2,
+        "total": 3,
+        "total_pages": 2,
+        "has_next": True,
+        "has_prev": False,
+    }
+
+    page_two = client.get("/notifications?page=2&per_page=2", headers=headers)
+    assert page_two.status_code == 200
+    page_two_payload = page_two.get_json()
+    assert [item["title"] for item in page_two_payload["results"]] == ["Update 0"]
+    assert page_two_payload["pagination"]["has_next"] is False
+    assert page_two_payload["pagination"]["has_prev"] is True
+    assert page_two_payload["pagination"]["total"] == 3
+    assert all(
+        item["user_id"] == worker_id
+        for item in page_one_payload["results"] + page_two_payload["results"]
+    )
+
+    capped = client.get("/api/v1/notifications?per_page=1000", headers=headers)
+    assert capped.status_code == 200
+    assert capped.get_json()["pagination"]["per_page"] == 100
+
+    out_of_range = client.get(
+        "/api/v1/notifications?page=999999999999999999999999",
+        headers=headers,
+    )
+    assert out_of_range.status_code == 200
+    assert out_of_range.get_json()["results"] == []
+    assert out_of_range.get_json()["pagination"]["total"] == 3
+
+    invalid_page = client.get("/api/v1/notifications?page=0", headers=headers)
+    assert invalid_page.status_code == 400
